@@ -15,6 +15,13 @@ server-tftp: server-tftp.c
 server-chat: server-chat.c 
 	$(CC) -o bin/$@ $^ $(CFLAGS)
 
+server-echo: server-echo.c
+	$(CC) -o bin/$@ $^ $(CFLAGS)
+
+
+server-echo-connection: server-echo-connection.c
+	$(CC) -o bin/$@ $^ $(CFLAGS)
+
 .PHONY: clean
 clean:
 	rm -f $(LIST)
