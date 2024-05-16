@@ -8,18 +8,23 @@
 #include <sys/socket.h>
 #include <signal.h>
 
-// Dirección por defecto del servidor.
 #define PORT 8888
 #define IP   "127.0.0.1"
 
-// Tamaño del buffer en donde se reciben los mensajes.
+// Tamaño del buffer en donde se reciben los mensajes. Debería ser el tamaño de tftp_packet creo
 #define BUFSIZE 100
-#define BACKLOGSIZE 10
+#define BLOCKSIZE 512
 
-// Descriptor de archivo del socket.
 static int fd;
 
-// Cierra el socket al recibir una señal SIGTERM.
+struct tftp_packet {
+    short opcode;
+    char filename[25];
+    char eof1;
+    char mode[25];
+    char eof2;
+};
+
 void handler(int signal)
 {
     close(fd);
@@ -34,7 +39,7 @@ int main(int argc, char* argv[])
     signal(SIGTERM, handler);
 
     // Crea el socket.
-    fd = socket(AF_INET, SOCK_STREAM, 0);
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
@@ -67,41 +72,37 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
-    listen(fd, BACKLOGSIZE);
-
-    struct sockaddr_in src_addr;
-    socklen_t src_addr_len;
-
-    int client_fd = accept(fd, (struct sockaddr*) &src_addr, &src_addr_len);
-
-    printf("Escuchando en %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+    printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
     
-    char buf[BUFSIZE];
+    //struct tftp_packet buf;
+    //struct sockaddr_in src_addr;
+    //socklen_t src_addr_len;
     
     for(;;) {
-        memset(&src_addr, 0, sizeof(struct sockaddr_in));
-        src_addr_len = sizeof(struct sockaddr_in);
+        //memset(&src_addr, 0, sizeof(struct sockaddr_in));
+        //src_addr_len = sizeof(struct sockaddr_in);
 
         // Recibe un mensaje entrante.
-        ssize_t n = recv(client_fd, buf, BUFSIZE, 0);
-        if(n == -1) {
-            perror("recv");
-            exit(EXIT_FAILURE);
+        //ssize_t n = recvfrom(fd, (char *) &buf, BUFSIZE, 0, (struct sockaddr*) &src_addr, &src_addr_len);
+        //
+        //if(n == -1) {
+        //    perror("recv");
+        //    exit(EXIT_FAILURE);
+        //}
+
+        //printf("[%s:%d] %x\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.opcode);
+        char str[100];
+        fgets(str, sizeof(str), stdin);
+        byte info[100];
+        for (int i = 0; str[i] != '\0'; i++) {
+            if (str[i] == '0') {
+                str[i] = '\0';
+            }
         }
-
-        // Elimina '\n' al final del buffer.
-        buf[n-1] = '\0';
-
-        // Imprime dirección del emisor y mensaje recibido.
-        printf("Mensaje del cliente: %s\n",  buf);
-        buf[n] = '\n';
-        send(client_fd, buf, n + 1, 0);
-        //sendto(fd, buf, n + 1, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
+        sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
     }
 
-    // Cierra el socket.
     close(fd);
 
     exit(EXIT_SUCCESS);
 }
-

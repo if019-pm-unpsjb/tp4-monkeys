@@ -18,8 +18,10 @@ server-chat: server-chat.c
 server-echo: server-echo.c
 	$(CC) -o bin/$@ $^ $(CFLAGS)
 
-
 server-echo-connection: server-echo-connection.c
+	$(CC) -o bin/$@ $^ $(CFLAGS)
+
+client-tftp: client-tftp.c
 	$(CC) -o bin/$@ $^ $(CFLAGS)
 
 .PHONY: clean
