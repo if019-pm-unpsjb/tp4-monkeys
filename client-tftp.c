@@ -77,32 +77,44 @@ int main(int argc, char* argv[])
     //struct tftp_packet buf;
     //struct sockaddr_in src_addr;
     //socklen_t src_addr_len;
-    
-    for(;;) {
-        //memset(&src_addr, 0, sizeof(struct sockaddr_in));
-        //src_addr_len = sizeof(struct sockaddr_in);
 
-        // Recibe un mensaje entrante.
-        //ssize_t n = recvfrom(fd, (char *) &buf, BUFSIZE, 0, (struct sockaddr*) &src_addr, &src_addr_len);
-        //
-        //if(n == -1) {
-        //    perror("recv");
-        //    exit(EXIT_FAILURE);
-        //}
+    // Armo el primer paquete de Read Request
+    char opcode[2] = "01";
+    char filename[100] = "test.txt\0";
+    char mode[100] = "NETASCII\0";
 
-        //printf("[%s:%d] %x\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.opcode);
-        char str[100];
-        fgets(str, sizeof(str), stdin);
-        byte info[100];
-        for (int i = 0; str[i] != '\0'; i++) {
-            if (str[i] == '0') {
-                str[i] = '\0';
-            }
-        }
-        sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
+    char str[202];
+    str[0] = opcode[0];
+    str[1] = opcode[1];
+    int i = 0;
+    int size = 3;
+    while (filename[i] != '\0') {
+        str[i + 2] = filename[i];
+        i++;
+        size++;
+    }
+    str[i + 2] = '\0';
+    i = 0;
+    while (mode[i] != '\0') {
+        str[i + size] = mode[i];
+        i++;
+    }
+    str[i + size + 2] = '\0';
+
+    // Mando el primer paquete de Read Request    
+    sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
+
+    // Me quedo esperando respuesta
+    char buf[BUFSIZE];
+    socklen_t src_addr_len;
+    recvfrom(fd, (char *) &buf, BUFSIZE, 0, (struct sockaddr*) &addr, &src_addr_len);
+
+    int terminado = 0;
+    // Empiezo a recibir datos y mandar acknowledge
+    while (terminado == 0) {
+        
     }
 
     close(fd);
-
     exit(EXIT_SUCCESS);
 }

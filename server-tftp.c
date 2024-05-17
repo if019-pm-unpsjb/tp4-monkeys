@@ -91,8 +91,52 @@ int main(int argc, char* argv[])
             exit(EXIT_FAILURE);
         }
 
-        printf("%s", buf);
-/*         printf("[%s:%d] %x\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.opcode);
+        // Obtengo los datos del paquete
+        // OPCODE
+        char opcode[2] = "";
+        opcode[0] = (buf[0]);
+        opcode[1] = (buf[1]);
+
+        // FILENAME
+        char filename[100];
+        int i = 2;
+        int filenameSize = 0;
+        while (buf[i] != '\0') {
+            filename[i - 2] = buf[i];
+            i++;
+            filenameSize++;
+        }
+
+        // EL MODE POR AHORA LO IGNORO, NO ME IMPORTA
+        /* filenameSize += 2;
+        char mode[100];
+        i = filenameSize ;
+        
+        while(buf[i] != '\0') {
+            mode[i - filenameSize] = buf[i];
+            i++;
+        } */
+
+        // El opcode[0] no me importa, siempre es 0. Chequeo el 1:
+
+        if (opcode[1] != '1') {
+            perror("Operation not implemented");
+            return 1;
+        }
+
+        // Si estoy aca entonces me pidieron leer, mando acknowledge
+        // Abro el archivo para empezar a mandar los datos.
+        /*printf("OPCODE %c%c\n", opcode[0], opcode[1]);
+
+        printf("FILENAME %s\n", filename); */
+
+        /* printf("MODE %s\n", mode); */
+
+        sleep(3);
+        sendto(fd, (char *) &buf, sizeof(buf), 0, (struct sockaddr*) &addr, sizeof(addr));
+
+        printf("DEVUELTO\n");
+        /*printf("[%s:%d] %x\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.opcode);
         printf("[%s:%d] %s\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.filename);
         printf("[%s:%d] %c\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.eof1);
         printf("[%s:%d] %s\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.mode); */
