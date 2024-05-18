@@ -133,25 +133,18 @@ int main(int argc, char* argv[])
             return EXIT_FAILURE;
         }
 
-        unsigned char fileBuffer[512];
         size_t bytesRead;
 
         char response[516];
         int blockN = 0;
-        int terminado = 0;
-        while (terminado == 0) {
+        unsigned char fileBuffer[512] = {0};
+        while (1) {
             printf("Escuchando en %s:%d ...\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
             // Leo los primeros 512 bytes del archivo
+            // Limpio el buffer antes de leer
+            memset(fileBuffer, 0, sizeof(fileBuffer));
+            memset(response, 0, sizeof(response));
             bytesRead = fread(fileBuffer, (blockN * sizeof(fileBuffer)) + 1, sizeof(fileBuffer), file);
-            if (bytesRead != sizeof(fileBuffer)) {
-                if (feof(file)) {
-                bytesRead = fread(fileBuffer, (blockN * sizeof(fileBuffer)) + 1, 1, file);
-                } else if (ferror(file)) {
-                    perror("Error al leer el archivo");
-                    fclose(file);
-                    return EXIT_FAILURE;
-                }
-            }
             // Armo los paquetes de data
             //int blockN = 0;
             response[0] = '0';
@@ -161,23 +154,24 @@ int main(int argc, char* argv[])
             memcpy(response + 4, fileBuffer, bytesRead);
             printf("%s\n", response);
             // Mando el paquete de data
-            sleep(3);
-            int n = sendto(fd, (char *) &response, sizeof(response), 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
+            sleep(1);
+            int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
             if (n == -1) {
                 perror("Erorr");
                 exit(1);
             }
-            printf("Intermedio\n");
             char ackBuf[4];
             n = recvfrom(fd, (char *) &ackBuf, 4, 0, (struct sockaddr*) &src_addr, &src_addr_len);
             if (n == -1) {
                 perror("Error en rcv");
                 exit(1);
             }
-            for (int i = 0; i < 4; i++) {
-                printf("%c", ackBuf[i]);
+
+            if (bytesRead < 512) {
+                printf("Dejo de escucharte!\n");
+                break;
             }
-            printf("\n");
+
         }
     }
 

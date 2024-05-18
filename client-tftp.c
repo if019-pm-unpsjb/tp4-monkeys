@@ -108,7 +108,7 @@ int main(int argc, char* argv[])
     FILE *file;
     
     for(;;) {
-        file = fopen(filename, "r");
+        file = fopen("test2.txt", "r");
         if (file == NULL) {
             perror("Error al abrir el archivo");
             return EXIT_FAILURE;
@@ -116,9 +116,13 @@ int main(int argc, char* argv[])
         // Me quedo esperando respuesta
         char dataBuffer[516];
         socklen_t src_addr_len;
-        // Lo recibí bien
         ssize_t receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
-        printf("%ld\n", receivedBytes);
+
+        if (dataBuffer[1] != '3') {
+            perror("Error del servidor");
+            exit(1);
+        }
+        // Lo recibí bien
         fprintf(file, "%s", dataBuffer);
         fclose(file);
         char ack[4];
@@ -129,8 +133,13 @@ int main(int argc, char* argv[])
         /* printf("ME llegó esto\n");
         printf("%s\n", dataBuffer);
         printf("%s\n", ack); */
-        sendto(fd, (char *) &ack, sizeof(ack), 0, (struct sockaddr*) &addr, sizeof(addr));
-
+        
+        sendto(fd, (char *) &ack, sizeof(ack), 0, (struct sockaddr*) &addr, sizeof(addr));            
+        
+        if (receivedBytes < 516) {
+            printf("Dejo de mandarte!\n");
+            break;
+        }
 
     }
 
