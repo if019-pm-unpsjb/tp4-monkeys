@@ -52,7 +52,7 @@ int main(int argc, char* argv[])
         addr.sin_port = htons((uint16_t) atoi(argv[2]));
         inet_aton(argv[1], &(addr.sin_addr));
     } else {
-        addr.sin_port = htons(PORT);
+        addr.sin_port = htons(0);
         inet_aton(IP, &(addr.sin_addr));
     }
 
@@ -71,6 +71,7 @@ int main(int argc, char* argv[])
         perror("bind");
         exit(EXIT_FAILURE);
     }
+    addr.sin_port = htons(PORT);
 
     printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
     
@@ -104,15 +105,33 @@ int main(int argc, char* argv[])
     // Mando el primer paquete de Read Request    
     sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
 
-    // Me quedo esperando respuesta
-    char buf[BUFSIZE];
-    socklen_t src_addr_len;
-    recvfrom(fd, (char *) &buf, BUFSIZE, 0, (struct sockaddr*) &addr, &src_addr_len);
+    FILE *file;
+    
+    for(;;) {
+        file = fopen(filename, "r");
+        if (file == NULL) {
+            perror("Error al abrir el archivo");
+            return EXIT_FAILURE;
+        }
+        // Me quedo esperando respuesta
+        char dataBuffer[516];
+        socklen_t src_addr_len;
+        // Lo recibí bien
+        ssize_t receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
+        printf("%ld\n", receivedBytes);
+        fprintf(file, "%s", dataBuffer);
+        fclose(file);
+        char ack[4];
+        ack[0] = '0';
+        ack[1] = '4'; 
+        ack[2] = '0';
+        ack[3] = dataBuffer[3];
+        /* printf("ME llegó esto\n");
+        printf("%s\n", dataBuffer);
+        printf("%s\n", ack); */
+        sendto(fd, (char *) &ack, sizeof(ack), 0, (struct sockaddr*) &addr, sizeof(addr));
 
-    int terminado = 0;
-    // Empiezo a recibir datos y mandar acknowledge
-    while (terminado == 0) {
-        
+
     }
 
     close(fd);

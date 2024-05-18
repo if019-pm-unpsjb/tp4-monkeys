@@ -98,7 +98,7 @@ int main(int argc, char* argv[])
         opcode[1] = (buf[1]);
 
         // FILENAME
-        char filename[100];
+        char filename[100] = "";
         int i = 2;
         int filenameSize = 0;
         while (buf[i] != '\0') {
@@ -126,22 +126,59 @@ int main(int argc, char* argv[])
 
         // Si estoy aca entonces me pidieron leer, mando acknowledge
         // Abro el archivo para empezar a mandar los datos.
-        /*printf("OPCODE %c%c\n", opcode[0], opcode[1]);
+        FILE *file;
+        file = fopen(filename, "r");
+        if (file == NULL) {
+            perror("Error al abrir el archivo");
+            return EXIT_FAILURE;
+        }
 
-        printf("FILENAME %s\n", filename); */
+        unsigned char fileBuffer[512];
+        size_t bytesRead;
 
-        /* printf("MODE %s\n", mode); */
-
-        sleep(3);
-        sendto(fd, (char *) &buf, sizeof(buf), 0, (struct sockaddr*) &addr, sizeof(addr));
-
-        printf("DEVUELTO\n");
-        /*printf("[%s:%d] %x\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.opcode);
-        printf("[%s:%d] %s\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.filename);
-        printf("[%s:%d] %c\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.eof1);
-        printf("[%s:%d] %s\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port), buf.mode); */
-
-        //sendto(fd, buf, n + 1, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
+        char response[516];
+        int blockN = 0;
+        int terminado = 0;
+        while (terminado == 0) {
+            printf("Escuchando en %s:%d ...\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
+            // Leo los primeros 512 bytes del archivo
+            bytesRead = fread(fileBuffer, (blockN * sizeof(fileBuffer)) + 1, sizeof(fileBuffer), file);
+            if (bytesRead != sizeof(fileBuffer)) {
+                if (feof(file)) {
+                bytesRead = fread(fileBuffer, (blockN * sizeof(fileBuffer)) + 1, 1, file);
+                } else if (ferror(file)) {
+                    perror("Error al leer el archivo");
+                    fclose(file);
+                    return EXIT_FAILURE;
+                }
+            }
+            // Armo los paquetes de data
+            //int blockN = 0;
+            response[0] = '0';
+            response[1] = '3';
+            response[2] = '0';
+            response[3] = '1';
+            memcpy(response + 4, fileBuffer, bytesRead);
+            printf("%s\n", response);
+            // Mando el paquete de data
+            sleep(3);
+            int n = sendto(fd, (char *) &response, sizeof(response), 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
+            if (n == -1) {
+                perror("Erorr");
+                exit(1);
+            }
+            printf("Intermedio\n");
+            char ackBuf[4];
+            n = recvfrom(fd, (char *) &ackBuf, 4, 0, (struct sockaddr*) &src_addr, &src_addr_len);
+            if (n == -1) {
+                perror("Error en rcv");
+                exit(1);
+            }
+            for (int i = 0; i < 4; i++) {
+                printf("%c", ackBuf[i]);
+            }
+            printf("\n");
+        }
     }
 
     close(fd);
