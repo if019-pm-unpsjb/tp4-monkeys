@@ -136,12 +136,11 @@ int main(int argc, char* argv[])
         size_t bytesRead;
 
         unsigned char response[516];
-        short blockN = 0;
-        short ackBlock;
+        unsigned short blockN = 0;
+        unsigned short ackBlock;
         //char strBlockN[2] = "00";
         unsigned char fileBuffer[512] = {0};
         while (1) {
-            printf("Escuchando en %s:%d ...\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
             // Leo los primeros 512 bytes del archivo
             // Limpio el buffer antes de leer
             memset(fileBuffer, 0, sizeof(fileBuffer));
@@ -156,10 +155,10 @@ int main(int argc, char* argv[])
             /* response[2] = strBlockN[0];
             response[3] = blockN; */
             memcpy(response + 4, fileBuffer, bytesRead);
-            for (int i = 4; i < sizeof(response); i++) {
+            /* for (int i = 4; i < sizeof(response); i++) {
                 printf("%c", response[i]);
             }
-            printf("\n");
+            printf("\n"); */
             // Mando el paquete de data
             //sleep(1);
             int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
@@ -168,7 +167,7 @@ int main(int argc, char* argv[])
                 exit(1);
             }
 
-            printf("BLOQUE %d %c%c", blockN, response[2], response[3]);
+            //printf("BLOQUE %d %c%c", blockN, response[2], response[3]);
             unsigned char ackBuf[4];
             n = recvfrom(fd, (char *) &ackBuf, 4, 0, (struct sockaddr*) &src_addr, &src_addr_len);
             if (n == -1) {
@@ -177,7 +176,7 @@ int main(int argc, char* argv[])
             }
 
             ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]);
-            printf("ACK RECIBIDO: %d\n", ackBlock);
+            //printf("ACK RECIBIDO: %d\n", ackBlock);
             /* printf("ACK RECIBIDO");
             for (int i = 0; i < 4; i++) {
                 printf("%c", ackBuf[i]);

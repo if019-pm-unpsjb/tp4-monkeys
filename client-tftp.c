@@ -94,6 +94,7 @@ int main(int argc, char* argv[])
         i++;
         size++;
     }
+
     str[i + 2] = '\0';
     i = 0;
     while (mode[i] != '\0') {
@@ -107,8 +108,8 @@ int main(int argc, char* argv[])
 
     FILE *file;
 
-    short nextBlock = 0;
-    short receivedBlock;
+    unsigned short nextBlock = 0;
+    unsigned short receivedBlock;
     file = fopen("test2.txt", "wb");
     if (file == NULL) {
         perror("Error al abrir el archivo");
@@ -127,7 +128,7 @@ int main(int argc, char* argv[])
         }
 
         receivedBlock = (short) ((dataBuffer[2] << 8) | dataBuffer[3]);
-        printf("BLOQUE RECIBIDO: %d. ACTUAL: %d", receivedBlock, nextBlock);
+        //printf("BLOQUE RECIBIDO: %d. ACTUAL: %d", receivedBlock, nextBlock);
         if (receivedBlock != nextBlock) {
             // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
             perror("Recibí otro bloque");
@@ -137,8 +138,8 @@ int main(int argc, char* argv[])
 
         printf("Bloqke: %d\n", receivedBlock);
         // Lo recibí bien, escribo en el archivo
-        size_t bytesWritten = fwrite(dataBuffer + 4, sizeof(unsigned char), receivedBytes - 4, file);
-        printf("ESCRIBI %ld BYTES %ld.\n", bytesWritten, receivedBytes);
+        fwrite(dataBuffer + 4, sizeof(unsigned char), receivedBytes - 4, file);
+        //printf("ESCRIBI %ld BYTES %ld.\n", bytesWritten, receivedBytes);
         memset(dataBuffer, 0, sizeof(dataBuffer));
 
 
