@@ -135,8 +135,10 @@ int main(int argc, char* argv[])
 
         size_t bytesRead;
 
-        char response[516];
-        int blockN = 0;
+        unsigned char response[516];
+        short blockN = 0;
+        short ackBlock;
+        //char strBlockN[2] = "00";
         unsigned char fileBuffer[512] = {0};
         while (1) {
             printf("Escuchando en %s:%d ...\n", inet_ntoa(src_addr.sin_addr), ntohs(src_addr.sin_port));
@@ -144,34 +146,58 @@ int main(int argc, char* argv[])
             // Limpio el buffer antes de leer
             memset(fileBuffer, 0, sizeof(fileBuffer));
             memset(response, 0, sizeof(response));
-            bytesRead = fread(fileBuffer, (blockN * sizeof(fileBuffer)) + 1, sizeof(fileBuffer), file);
+            bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
             // Armo los paquetes de data
             //int blockN = 0;
             response[0] = '0';
             response[1] = '3';
-            response[2] = '0';
-            response[3] = '1';
+            response[2] = (unsigned char)((blockN >> 8) & 0xFF);
+            response[3] = (unsigned char)(blockN & 0xFF);
+            /* response[2] = strBlockN[0];
+            response[3] = blockN; */
             memcpy(response + 4, fileBuffer, bytesRead);
-            printf("%s\n", response);
+            for (int i = 4; i < sizeof(response); i++) {
+                printf("%c", response[i]);
+            }
+            printf("\n");
             // Mando el paquete de data
-            sleep(1);
+            //sleep(1);
             int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
             if (n == -1) {
                 perror("Erorr");
                 exit(1);
             }
-            char ackBuf[4];
+
+            printf("BLOQUE %d %c%c", blockN, response[2], response[3]);
+            unsigned char ackBuf[4];
             n = recvfrom(fd, (char *) &ackBuf, 4, 0, (struct sockaddr*) &src_addr, &src_addr_len);
             if (n == -1) {
                 perror("Error en rcv");
                 exit(1);
             }
 
+            ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]);
+            printf("ACK RECIBIDO: %d\n", ackBlock);
+            /* printf("ACK RECIBIDO");
+            for (int i = 0; i < 4; i++) {
+                printf("%c", ackBuf[i]);
+            }
+            printf("\n"); */
+
+            if (ackBlock != blockN || ackBuf[1] != '4') {
+                // Ahora salgo y tiro error, después lo tengo que manejar
+                printf("Error en el acknowledge. Bloque: %d. Opcode: %c%c.", ackBlock, ackBuf[0], ackBuf[1]);
+                perror("Error");
+                exit(1);
+            }
+            /* printf("%d-%d BLOCKE, %d", response[2], response[3], blockN);
+            printf(" | %d TRANSFORMADO", (short)((response[2] << 8) | response[3])); */
+
             if (bytesRead < 512) {
                 printf("Dejo de escucharte!\n");
                 break;
             }
-
+            blockN++;
         }
     }
 

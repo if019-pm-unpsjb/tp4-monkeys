@@ -106,15 +106,18 @@ int main(int argc, char* argv[])
     sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
 
     FILE *file;
-    
+
+    short nextBlock = 0;
+    short receivedBlock;
+    file = fopen("test2.txt", "wb");
+    if (file == NULL) {
+        perror("Error al abrir el archivo");
+        return EXIT_FAILURE;
+    }
     for(;;) {
-        file = fopen("test2.txt", "r");
-        if (file == NULL) {
-            perror("Error al abrir el archivo");
-            return EXIT_FAILURE;
-        }
+        
         // Me quedo esperando respuesta
-        char dataBuffer[516];
+        unsigned char dataBuffer[516];
         socklen_t src_addr_len;
         ssize_t receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
 
@@ -122,27 +125,38 @@ int main(int argc, char* argv[])
             perror("Error del servidor");
             exit(1);
         }
-        // Lo recibí bien
-        fprintf(file, "%s", dataBuffer);
-        fclose(file);
+
+        receivedBlock = (short) ((dataBuffer[2] << 8) | dataBuffer[3]);
+        printf("BLOQUE RECIBIDO: %d. ACTUAL: %d", receivedBlock, nextBlock);
+        if (receivedBlock != nextBlock) {
+            // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
+            perror("Recibí otro bloque");
+            exit(1);
+        }
+
+
+        printf("Bloqke: %d\n", receivedBlock);
+        // Lo recibí bien, escribo en el archivo
+        size_t bytesWritten = fwrite(dataBuffer + 4, sizeof(unsigned char), receivedBytes - 4, file);
+        printf("ESCRIBI %ld BYTES %ld.\n", bytesWritten, receivedBytes);
+        memset(dataBuffer, 0, sizeof(dataBuffer));
+
+
         char ack[4];
         ack[0] = '0';
-        ack[1] = '4'; 
-        ack[2] = '0';
-        ack[3] = dataBuffer[3];
-        /* printf("ME llegó esto\n");
-        printf("%s\n", dataBuffer);
-        printf("%s\n", ack); */
-        
+        ack[1] = '4';
+        ack[2] = (unsigned char)((nextBlock >> 8) & 0xFF);
+        ack[3] = (unsigned char)(nextBlock & 0xFF);
+
         sendto(fd, (char *) &ack, sizeof(ack), 0, (struct sockaddr*) &addr, sizeof(addr));            
         
         if (receivedBytes < 516) {
             printf("Dejo de mandarte!\n");
             break;
         }
+        nextBlock++;
 
     }
-
     close(fd);
     exit(EXIT_SUCCESS);
 }
