@@ -17,13 +17,15 @@
 
 static int fd;
 
-struct tftp_packet {
+
+// No lo usamos, podríamos pensar en hacerlo
+/* struct tftp_packet {
     short opcode;
     char filename[25];
     char eof1;
     char mode[25];
     char eof2;
-};
+}; */
 
 void handler(int signal)
 {
@@ -31,10 +33,14 @@ void handler(int signal)
     exit(EXIT_SUCCESS);
 }
 
+void buildRequestPackage(unsigned char * str, char opcode[2], char filename[100], char mode[100]);
+void receiveFile(char * destFilename);
+void buildAckPackage(unsigned char * str, unsigned short block);
+
+struct sockaddr_in addr;
+
 int main(int argc, char* argv[])
 {
-    struct sockaddr_in addr;
-
     // Configura el manejador de señal SIGTERM.
     signal(SIGTERM, handler);
 
@@ -74,17 +80,32 @@ int main(int argc, char* argv[])
     addr.sin_port = htons(PORT);
 
     printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
-    
-    //struct tftp_packet buf;
-    //struct sockaddr_in src_addr;
-    //socklen_t src_addr_len;
+
 
     // Armo el primer paquete de Read Request
     char opcode[2] = "01";
-    char filename[100] = "test.txt\0";
-    char mode[100] = "NETASCII\0";
+    char filename[100] = "test.txt";
+    char mode[100] = "NETASCII";
 
-    char str[202];
+    unsigned char str[202];
+    buildRequestPackage(str, opcode, filename, mode);
+
+    if (opcode[1] != '1') {
+        perror("Operación no implementada");
+        exit(1);
+    }
+    
+    char destFilename[100] = "test2.txt";
+    // Mando el primer paquete de Read Request    
+    sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
+    // Recibo el archivo
+    receiveFile(destFilename);
+    
+    close(fd);
+    exit(EXIT_SUCCESS);
+}
+
+void buildRequestPackage(unsigned char * str, char opcode[2], char filename[100], char mode[100]) {
     str[0] = opcode[0];
     str[1] = opcode[1];
     int i = 0;
@@ -102,22 +123,30 @@ int main(int argc, char* argv[])
         i++;
     }
     str[i + size + 2] = '\0';
+    return;
+}
 
-    // Mando el primer paquete de Read Request    
-    sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
+void buildAckPackage(unsigned char * str, unsigned short block) {
+    str[0] = '0';
+    str[1] = '4';
+    str[2] = (unsigned char)((block >> 8) & 0xFF);
+    str[3] = (unsigned char)(block & 0xFF);
+}
 
+void receiveFile(char * destFilename) {
     FILE *file;
 
     unsigned short nextBlock = 0;
     unsigned short receivedBlock;
-    file = fopen("test2.txt", "wb");
+    // Desp le tendría que poner en los argumentos
+    file = fopen(destFilename, "wb");
     if (file == NULL) {
         perror("Error al abrir el archivo");
-        return EXIT_FAILURE;
+        exit(1);
     }
+
     for(;;) {
-        
-        // Me quedo esperando respuesta
+        // Me quedo esperando el paquete de datos
         unsigned char dataBuffer[516];
         socklen_t src_addr_len;
         ssize_t receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
@@ -128,7 +157,6 @@ int main(int argc, char* argv[])
         }
 
         receivedBlock = (short) ((dataBuffer[2] << 8) | dataBuffer[3]);
-        //printf("BLOQUE RECIBIDO: %d. ACTUAL: %d", receivedBlock, nextBlock);
         if (receivedBlock != nextBlock) {
             // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
             perror("Recibí otro bloque");
@@ -136,28 +164,22 @@ int main(int argc, char* argv[])
         }
 
 
-        printf("Bloqke: %d\n", receivedBlock);
         // Lo recibí bien, escribo en el archivo
         fwrite(dataBuffer + 4, sizeof(unsigned char), receivedBytes - 4, file);
-        //printf("ESCRIBI %ld BYTES %ld.\n", bytesWritten, receivedBytes);
         memset(dataBuffer, 0, sizeof(dataBuffer));
 
-
-        char ack[4];
-        ack[0] = '0';
-        ack[1] = '4';
-        ack[2] = (unsigned char)((nextBlock >> 8) & 0xFF);
-        ack[3] = (unsigned char)(nextBlock & 0xFF);
+        // Mando el paquete de acknowledge al servidor
+        unsigned char ack[4];
+        buildAckPackage(ack, nextBlock);
 
         sendto(fd, (char *) &ack, sizeof(ack), 0, (struct sockaddr*) &addr, sizeof(addr));            
         
+        // Si la data es menos de 512 entonces ya terminé (y ya mandé el acknowledge)
         if (receivedBytes < 516) {
             printf("Dejo de mandarte!\n");
             break;
         }
         nextBlock++;
-
     }
-    close(fd);
-    exit(EXIT_SUCCESS);
+    return;
 }
