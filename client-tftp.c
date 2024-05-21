@@ -136,7 +136,7 @@ void buildAckPackage(unsigned char * str, unsigned short block) {
 void receiveFile(char * destFilename) {
     FILE *file;
 
-    unsigned short nextBlock = 0;
+    unsigned short nextBlock = 1;
     unsigned short receivedBlock;
     // Desp le tendría que poner en los argumentos
     file = fopen(destFilename, "wb");
@@ -171,7 +171,7 @@ void receiveFile(char * destFilename) {
         // Mando el paquete de acknowledge al servidor
         unsigned char ack[4];
         buildAckPackage(ack, nextBlock);
-
+        sleep(10);
         sendto(fd, (char *) &ack, sizeof(ack), 0, (struct sockaddr*) &addr, sizeof(addr));            
         
         // Si la data es menos de 512 entonces ya terminé (y ya mandé el acknowledge)

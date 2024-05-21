@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <errno.h>
 #include <signal.h>
 
 #define PORT 8888
@@ -64,6 +65,16 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
+    struct timeval timeout;
+    // Agregar time out al socket para la espera de paquetes
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt SO_RCVTIMEO");
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
     // Asocia el socket con la dirección indicada. Tradicionalmente esta 
     // operación se conoce como "asignar un nombre al socket".
     int b = bind(fd, (struct sockaddr*) &addr, sizeof(addr));
@@ -108,16 +119,7 @@ int main(int argc, char* argv[])
         }
 
         // EL MODE POR AHORA LO IGNORO, NO ME IMPORTA
-        /* filenameSize += 2;
-        char mode[100];
-        i = filenameSize ;
-        
-        while(buf[i] != '\0') {
-            mode[i - filenameSize] = buf[i];
-            i++;
-        } */
-
-        // El opcode[0] no me importa, siempre es 0. Chequeo el 1:
+        // El opcode[0] no me importa, siempre es 0. Chequeo el [1]:
 
         if (opcode[1] != '1') {
             perror("Operation not implemented");
@@ -136,9 +138,8 @@ int main(int argc, char* argv[])
         size_t bytesRead;
 
         unsigned char response[516];
-        unsigned short blockN = 0;
+        unsigned short blockN = 1;
         unsigned short ackBlock;
-        //char strBlockN[2] = "00";
         unsigned char fileBuffer[512] = {0};
         while (1) {
             // Leo los primeros 512 bytes del archivo
@@ -152,13 +153,9 @@ int main(int argc, char* argv[])
             response[1] = '3';
             response[2] = (unsigned char)((blockN >> 8) & 0xFF);
             response[3] = (unsigned char)(blockN & 0xFF);
-            /* response[2] = strBlockN[0];
-            response[3] = blockN; */
+            
             memcpy(response + 4, fileBuffer, bytesRead);
-            /* for (int i = 4; i < sizeof(response); i++) {
-                printf("%c", response[i]);
-            }
-            printf("\n"); */
+             
             // Mando el paquete de data
             //sleep(1);
             int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
@@ -171,26 +168,22 @@ int main(int argc, char* argv[])
             unsigned char ackBuf[4];
             n = recvfrom(fd, (char *) &ackBuf, 4, 0, (struct sockaddr*) &src_addr, &src_addr_len);
             if (n == -1) {
-                perror("Error en rcv");
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    printf("recvfrom timed out\n");
+                } else {
+                perror("Error en rcv\n");
+                }
                 exit(1);
             }
 
-            ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]);
-            //printf("ACK RECIBIDO: %d\n", ackBlock);
-            /* printf("ACK RECIBIDO");
-            for (int i = 0; i < 4; i++) {
-                printf("%c", ackBuf[i]);
-            }
-            printf("\n"); */
+            ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]); 
 
             if (ackBlock != blockN || ackBuf[1] != '4') {
                 // Ahora salgo y tiro error, después lo tengo que manejar
                 printf("Error en el acknowledge. Bloque: %d. Opcode: %c%c.", ackBlock, ackBuf[0], ackBuf[1]);
                 perror("Error");
                 exit(1);
-            }
-            /* printf("%d-%d BLOCKE, %d", response[2], response[3], blockN);
-            printf(" | %d TRANSFORMADO", (short)((response[2] << 8) | response[3])); */
+            } 
 
             if (bytesRead < 512) {
                 printf("Dejo de escucharte!\n");
