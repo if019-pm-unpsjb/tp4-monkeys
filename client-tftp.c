@@ -192,8 +192,8 @@ void receiveFile(char * destFilename) {
             break;
         }
         // Duermo un random de 0 a 3
-        /* int randSleep = rand() % (5 + 1 - 0) + 0;
-        sleep(randSleep); */
+        int randSleep = rand() % (5 + 1 - 0) + 0;
+        sleep(randSleep); 
         nextBlock++;
     }
     return;
