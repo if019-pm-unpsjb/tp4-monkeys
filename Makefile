@@ -9,20 +9,20 @@ all: $(PROGS)
 
 LIST=$(addprefix $(BIN)/, $(PROGS))
 
-server-tftp: server-tftp.c 
-	$(CC) -o bin/$@ $^ $(CFLAGS)
-
 server-chat: server-chat.c 
-	$(CC) -o bin/$@ $^ $(CFLAGS)
+	$(CC) -o $(BIN)/$@ $^ $(CFLAGS)
 
 server-echo: server-echo.c
-	$(CC) -o bin/$@ $^ $(CFLAGS)
+	$(CC) -o $(BIN)/$@ $^ $(CFLAGS)
 
 server-echo-connection: server-echo-connection.c
-	$(CC) -o bin/$@ $^ $(CFLAGS)
+	$(CC) -o $(BIN)/$@ $^ $(CFLAGS)
 
 client-tftp: client-tftp.c
-	$(CC) -o bin/$@ $^ $(CFLAGS)
+	$(CC) -o $(BIN)/$@ $^ $(CFLAGS)
+
+server-tftp: server-tftp/main.c server-tftp/request_handler.c server-tftp/utils.c
+	$(CC) -o $(BIN)/$@ $^ $(CFLAGS)
 
 .PHONY: clean
 clean:

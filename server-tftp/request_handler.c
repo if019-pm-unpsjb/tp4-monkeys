@@ -7,76 +7,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <errno.h>
-#include <signal.h>
 
-#define PORT 8888
-#define IP   "127.0.0.1"
 #define BUFSIZE 100
-#define INITIAL_TIMEOUT_SEC 1
 #define MAX_RETRIES 5
 
-static int fd;
-struct sockaddr_in src_addr;
-socklen_t src_addr_len;
+extern struct sockaddr_in src_addr;
+extern socklen_t src_addr_len;
 
-void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN);
-void sendErrorPackage(unsigned char * message);
-void handler(int signal);
-void processRequest(int fd, struct sockaddr_in addr);
-
-void handler(int signal) {
-    close(fd);
-    exit(EXIT_SUCCESS);
-}
-
-int main(int argc, char* argv[]) {
-    struct sockaddr_in addr;
-    signal(SIGTERM, handler);
-    fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (fd == -1) {
-        perror("socket");
-        exit(EXIT_FAILURE);
-    }
-
-    memset(&addr, 0, sizeof(struct sockaddr_in));
-    addr.sin_family = AF_INET;
-    if (argc == 3) {
-        addr.sin_port = htons((uint16_t) atoi(argv[2]));
-        inet_aton(argv[1], &(addr.sin_addr));
-    } else {
-        addr.sin_port = htons(PORT);
-        inet_aton(IP, &(addr.sin_addr));
-    }
-
-    int optval = 1;
-    int optname = SO_REUSEADDR | SO_REUSEPORT;
-    if (setsockopt(fd, SOL_SOCKET, optname, &optval, sizeof(optval)) == -1) {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-
-    struct timeval timeout;
-    timeout.tv_sec = INITIAL_TIMEOUT_SEC;
-    timeout.tv_usec = 0;
-    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0) {
-        perror("setsockopt SO_RCVTIMEO");
-        close(fd);
-        exit(EXIT_FAILURE);
-    }
-
-    int b = bind(fd, (struct sockaddr*) &addr, sizeof(addr));
-    if (b == -1) {
-        perror("bind");
-        exit(EXIT_FAILURE);
-    }
-
-    while (1) {
-        processRequest(fd, addr);
-    }
-
-    close(fd);
-    return 0;
-}
+void buildDataPackage(unsigned char *response, unsigned char *fileBuffer, size_t bytesRead, unsigned short blockN);
+void sendErrorPackage(int fd, unsigned char *message);
 
 void processRequest(int fd, struct sockaddr_in addr) {
     unsigned char buf[BUFSIZE];
@@ -121,7 +60,7 @@ void processRequest(int fd, struct sockaddr_in addr) {
             file = fopen(filename, "r");
             if (file == NULL) {
                 printf("Error %s\n", filename);
-                sendErrorPackage((unsigned char*)"Error: el archivo solicitado no existe o no tenés permisos.\n");
+                sendErrorPackage(fd, (unsigned char*)"Error: el archivo solicitado no existe o no tenés permisos.\n");
                 memset(filename, 0, sizeof(filename));
                 received = 0;
             }
@@ -189,20 +128,4 @@ void processRequest(int fd, struct sockaddr_in addr) {
     if (retries >= MAX_RETRIES) {
         printf("Máximo número de reintentos alcanzado. No se puede enviar el archivo.\n");
     }
-}
-
-void buildDataPackage(unsigned char *response, unsigned char *fileBuffer, size_t bytesRead, unsigned short blockN) {
-    response[0] = '0';
-    response[1] = '3';
-    response[2] = (unsigned char)((blockN >> 8) & 0xFF);
-    response[3] = (unsigned char)(blockN & 0xFF);
-    memcpy(response + 4, fileBuffer, bytesRead);
-}
-
-void sendErrorPackage(unsigned char *message) {
-    unsigned char response[100];
-    response[0] = '0';
-    response[1] = '5';
-    memcpy(response + 2, message, strlen((char *)message));
-    sendto(fd, (char *)&response, 2 + strlen((char *)message), 0, (struct sockaddr*)&src_addr, sizeof(src_addr));
 }
