@@ -12,7 +12,7 @@
 #define PORT 8888
 #define IP   "127.0.0.1"
 #define BUFSIZE 100
-#define INITIAL_TIMEOUT_SEC 1
+#define INITIAL_TIMEOUT_SEC 0
 #define MAX_RETRIES 5
 
 static int fd;
@@ -116,8 +116,8 @@ int main(int argc, char* argv[])
                     i++;
                     filenameSize++;
                 }
-                if (opcode[1] != '1' && opcode[1] != '4') {
-                    printf("Operation not implemented %s\n", buf);
+                if (opcode[1] != 1 && opcode[1] != '4') {
+                    printf("Operation not implemented %d\n", opcode[1]);
                     return 1;
                 } else if (opcode[1] != '4') {
                     received = 1;
@@ -174,10 +174,11 @@ int main(int argc, char* argv[])
                 } else {
                     printf("Bloque %d recibido\n", (short)((ackBuf[2] << 8) | ackBuf[3]));
                     ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]); 
-                    if (ackBlock != blockN || ackBuf[1] != '4') {
+                    if (ackBlock != blockN || ackBuf[1] != 4) {
                         if (ackBlock < blockN) {
                             retries = 0;
                         } else {
+                            printf("%X | %X\n", ackBuf[2], ackBuf[3]);
                             printf("Error en el acknowledge. Bloque: %d. Opcode: %c%c. %s", ackBlock, ackBuf[0], ackBuf[1], ackBuf);
                             perror("Error");
                             exit(1);

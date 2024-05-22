@@ -77,11 +77,11 @@ int main(int argc, char* argv[])
 
     // Asocia el socket con la dirección indicada. Tradicionalmente esta 
     // operación se conoce como "asignar un nombre al socket".
-    int b = bind(fd, (struct sockaddr*) &addr, sizeof(addr));
+    /* int b = bind(fd, (struct sockaddr*) &addr, sizeof(addr));
     if (b == -1) {
         perror("bind");
         exit(EXIT_FAILURE);
-    }
+    } */
     addr.sin_port = htons(PORT);
 
     printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
@@ -123,8 +123,8 @@ void buildRequestPackage(unsigned char * str, char opcode[2], char filename[100]
 
 void sendAckPackage(unsigned short block) {
     unsigned char str[4];
-    str[0] = '0';
-    str[1] = '4';
+    str[0] = 0;
+    str[1] = 4;
     str[2] = (unsigned char)((block >> 8) & 0xFF);
     str[3] = (unsigned char)(block & 0xFF);
     sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));    
@@ -142,7 +142,9 @@ void receiveFile(char * destFilename) {
     }
 
     // Armo el primer paquete de Read Request
-    char opcode[2] = "01";
+    char opcode[2];
+    opcode[0] = 0;
+    opcode[1] = 1;
     char mode[100] = "NETASCII";
 
     unsigned char str[202];
@@ -160,7 +162,7 @@ void receiveFile(char * destFilename) {
         while (received == 0) {
             receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
 
-            if (dataBuffer[1] == '5') {
+            if (dataBuffer[1] == 5) {
                 printf("%s\n", &dataBuffer[2]);
                 exit(1);
             }
