@@ -25,11 +25,16 @@ struct tftp_packet {
     char eof2;
 };
 
+void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN);
+void sendErrorPackage(unsigned char * message);
 void handler(int signal)
 {
     close(fd);
     exit(EXIT_SUCCESS);
 }
+
+struct sockaddr_in src_addr;
+socklen_t src_addr_len;
 
 int main(int argc, char* argv[])
 {
@@ -73,15 +78,14 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
-    printf("Escuchando en %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
     
     unsigned char buf[BUFSIZE];
-    struct sockaddr_in src_addr;
-    socklen_t src_addr_len;
 
     int received = 0;
 
+    FILE *file;
     for (;;) {
+        printf("Escuchando en %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
         memset(&src_addr, 0, sizeof(struct sockaddr_in));
         src_addr_len = sizeof(struct sockaddr_in);
 
@@ -105,29 +109,32 @@ int main(int argc, char* argv[])
                 opcode[0] = (buf[0]);
                 opcode[1] = (buf[1]);
 
+                int i = 2;
+                int filenameSize = 0;
+                while (buf[i] != '\0') {
+                    filename[i - 2] = buf[i];
+                    i++;
+                    filenameSize++;
+                }
                 if (opcode[1] != '1' && opcode[1] != '4') {
                     printf("Operation not implemented %s\n", buf);
                     return 1;
                 } else if (opcode[1] != '4') {
                     received = 1;
                 }
+
+                file = fopen(filename, "r");
+                if (file == NULL) {
+                    printf("Error %s\n", filename);
+                    sendErrorPackage((unsigned char *)"Error: el archivo solicitado no existe o no tenés permisos.\n");
+                    memset(filename, 0, sizeof(filename));
+                    received = 0;
+                }
+
             }
         }
 
-        int i = 2;
-        int filenameSize = 0;
-        while (buf[i] != '\0') {
-            filename[i - 2] = buf[i];
-            i++;
-            filenameSize++;
-        }
-
-        FILE *file;
-        file = fopen(filename, "r");
-        if (file == NULL) {
-            perror("Error al abrir el archivo");
-            return EXIT_FAILURE;
-        }
+        
 
         size_t bytesRead;
 
@@ -140,13 +147,8 @@ int main(int argc, char* argv[])
             memset(fileBuffer, 0, sizeof(fileBuffer));
             memset(response, 0, sizeof(response));
             bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
-            response[0] = '0';
-            response[1] = '3';
-            response[2] = (unsigned char)((blockN >> 8) & 0xFF);
-            response[3] = (unsigned char)(blockN & 0xFF);
+            buildDataPackage(response, fileBuffer, bytesRead, blockN);
             
-            memcpy(response + 4, fileBuffer, bytesRead);
-                
             received = 0;
             retries = 0;
             while (received == 0 && retries <= MAX_RETRIES) {
@@ -201,4 +203,21 @@ int main(int argc, char* argv[])
 
     close(fd);
     exit(EXIT_SUCCESS);
+}
+
+void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN) {
+    response[0] = '0';
+    response[1] = '3';
+    response[2] = (unsigned char)((blockN >> 8) & 0xFF);
+    response[3] = (unsigned char)(blockN & 0xFF);
+    memcpy(response + 4, fileBuffer, bytesRead);
+}
+
+void sendErrorPackage(unsigned char * message) {
+    unsigned char response[100];
+    response[0] = '0';
+    response[1] = '5';
+    memcpy(response + 2, message, strlen((char *)message));
+
+    sendto(fd, (char *) &response, 2 + strlen((char *)message), 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
 }

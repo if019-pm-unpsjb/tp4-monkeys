@@ -86,9 +86,9 @@ int main(int argc, char* argv[])
 
     printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
     
-    if (argc == 5) {
+    if (argc >= 2) {
+        filename = argv[1];
         destFilename = argv[2];
-        filename = argv[3];
     } else {
         destFilename = DEFAULT_DEST;
         filename = DEFAULT_FILENAME;
@@ -148,10 +148,6 @@ void receiveFile(char * destFilename) {
     unsigned char str[202];
     buildRequestPackage(str, opcode, filename, mode);
 
-    if (opcode[1] != '1') {
-        perror("Operación no implementada");
-        exit(1);
-    }
     // Mando el primer paquete de Read Request    
     sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
 
@@ -162,11 +158,10 @@ void receiveFile(char * destFilename) {
         int received = 0;
         ssize_t receivedBytes;
         while (received == 0) {
-            sendAckPackage(nextBlock);
             receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
 
-            if (dataBuffer[1] != '3') {
-                perror("Error del servidor");
+            if (dataBuffer[1] == '5') {
+                printf("%s\n", &dataBuffer[2]);
                 exit(1);
             }
 
