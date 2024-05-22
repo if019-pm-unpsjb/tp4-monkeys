@@ -1,3 +1,4 @@
+/*es responsable de manejar cada solicitud TFTP que recibe el servidor*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

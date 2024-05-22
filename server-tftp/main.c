@@ -1,3 +1,4 @@
+/*su principal responsabilidad es la configuración inicial y el manejo del bucle principal del servidor*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

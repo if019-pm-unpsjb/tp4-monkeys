@@ -1,3 +1,4 @@
+/*contiene funciones auxiliares que ayudan a construir y enviar paquetes de datos y errores*/
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
