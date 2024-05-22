@@ -12,7 +12,7 @@
 #define PORT 8888
 #define IP   "127.0.0.1"
 #define BUFSIZE 100
-#define INITIAL_TIMEOUT_SEC 10
+#define INITIAL_TIMEOUT_SEC 1
 #define MAX_RETRIES 5
 
 static int fd;
@@ -79,68 +79,77 @@ int main(int argc, char* argv[])
     struct sockaddr_in src_addr;
     socklen_t src_addr_len;
 
+    int received = 0;
+
     for (;;) {
         memset(&src_addr, 0, sizeof(struct sockaddr_in));
         src_addr_len = sizeof(struct sockaddr_in);
 
         int retries = 0;
-        while (retries < MAX_RETRIES) {
+        received = 0;
+        char filename[100] = "";
+        while (received == 0) {
             ssize_t n = recvfrom(fd, (char *) &buf, BUFSIZE, 0, (struct sockaddr*) &src_addr, &src_addr_len);
 
             if (n == -1) {
                 if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                    printf("recvfrom timed out, retrying...\n");
                     retries++;
                     continue;
                 } else {
                     perror("Error en recvfrom");
                     exit(EXIT_FAILURE);
                 }
+            } else {
+                // Obtengo los datos del paquete
+                char opcode[2] = "";
+                opcode[0] = (buf[0]);
+                opcode[1] = (buf[1]);
+
+                if (opcode[1] != '1' && opcode[1] != '4') {
+                    printf("Operation not implemented %s\n", buf);
+                    return 1;
+                } else if (opcode[1] != '4') {
+                    received = 1;
+                }
             }
+        }
 
-            // Obtengo los datos del paquete
-            char opcode[2] = "";
-            opcode[0] = (buf[0]);
-            opcode[1] = (buf[1]);
+        int i = 2;
+        int filenameSize = 0;
+        while (buf[i] != '\0') {
+            filename[i - 2] = buf[i];
+            i++;
+            filenameSize++;
+        }
 
-            char filename[100] = "";
-            int i = 2;
-            int filenameSize = 0;
-            while (buf[i] != '\0') {
-                filename[i - 2] = buf[i];
-                i++;
-                filenameSize++;
-            }
+        FILE *file;
+        file = fopen(filename, "r");
+        if (file == NULL) {
+            perror("Error al abrir el archivo");
+            return EXIT_FAILURE;
+        }
 
-            if (opcode[1] != '1') {
-                perror("Operation not implemented");
-                return 1;
-            }
+        size_t bytesRead;
 
-            FILE *file;
-            file = fopen(filename, "r");
-            if (file == NULL) {
-                perror("Error al abrir el archivo");
-                return EXIT_FAILURE;
-            }
-
-            size_t bytesRead;
-
-            unsigned char response[516];
-            unsigned short blockN = 1;
-            unsigned short ackBlock;
-            unsigned char fileBuffer[512] = {0};
-            while (1) {
-                memset(fileBuffer, 0, sizeof(fileBuffer));
-                memset(response, 0, sizeof(response));
-                bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
-                response[0] = '0';
-                response[1] = '3';
-                response[2] = (unsigned char)((blockN >> 8) & 0xFF);
-                response[3] = (unsigned char)(blockN & 0xFF);
+        unsigned char response[516];
+        unsigned short blockN = 1;
+        unsigned short ackBlock;
+        unsigned char fileBuffer[512] = {0};
+        int done = 0;
+        while (done == 0) {
+            memset(fileBuffer, 0, sizeof(fileBuffer));
+            memset(response, 0, sizeof(response));
+            bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
+            response[0] = '0';
+            response[1] = '3';
+            response[2] = (unsigned char)((blockN >> 8) & 0xFF);
+            response[3] = (unsigned char)(blockN & 0xFF);
+            
+            memcpy(response + 4, fileBuffer, bytesRead);
                 
-                memcpy(response + 4, fileBuffer, bytesRead);
-                 
+            received = 0;
+            retries = 0;
+            while (received == 0 && retries <= MAX_RETRIES) {
                 int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
                 if (n == -1) {
                     perror("Error al enviar");
@@ -152,27 +161,36 @@ int main(int argc, char* argv[])
                 if (n == -1) {
                     if (errno == EWOULDBLOCK || errno == EAGAIN) {
                         printf("recvfrom timed out\n");
+                        retries++;
+                        if (retries == MAX_RETRIES) {
+                            perror("Max retries reached");
+                            exit(1);
+                        }
                     } else {
                         perror("Error en recvfrom");
                     }
-                    exit(1);
-                }
-
-                ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]); 
-
-                if (ackBlock != blockN || ackBuf[1] != '4') {
-                    printf("Error en el acknowledge. Bloque: %d. Opcode: %c%c.", ackBlock, ackBuf[0], ackBuf[1]);
-                    perror("Error");
-                    exit(1);
-                } 
-
-                if (bytesRead < 512) {
-                    printf("Dejo de escucharte!\n");
-                    break;
-                }
-                blockN++;
+                } else {
+                    printf("Bloque %d recibido\n", (short)((ackBuf[2] << 8) | ackBuf[3]));
+                    ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]); 
+                    if (ackBlock != blockN || ackBuf[1] != '4') {
+                        if (ackBlock < blockN) {
+                            retries = 0;
+                        } else {
+                            printf("Error en el acknowledge. Bloque: %d. Opcode: %c%c. %s", ackBlock, ackBuf[0], ackBuf[1], ackBuf);
+                            perror("Error");
+                            exit(1);
+                        }
+                    } else {
+                        received = 1;
+                    }
+                }                
             }
-            break;
+            blockN++;
+            if (bytesRead < 512) {
+                printf("Dejo de escucharte!\n");
+                done = 1;
+                break;
+            }
         }
 
         if (retries >= MAX_RETRIES) {
