@@ -161,7 +161,7 @@ void receiveFile(char * destFilename) {
         ssize_t receivedBytes;
         while (received == 0) {
             receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
-
+            
             if (dataBuffer[1] == 5) {
                 printf("%s\n", &dataBuffer[2]);
                 exit(1);
@@ -173,7 +173,7 @@ void receiveFile(char * destFilename) {
                     printf("Recibí otro bloque pero sigo %d %d\n", receivedBlock,nextBlock);
                 } else {
                     // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
-                    printf("Recibí otro bloque %d %d", receivedBlock,nextBlock);
+                    printf("Recibí otro bloque %c %d %d", receivedBlock,nextBlock, dataBuffer[1]);
                     exit(1);
                 }
             } else {
