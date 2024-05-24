@@ -103,7 +103,12 @@ int main(int argc, char* argv[])
         close(fd);
         exit(EXIT_FAILURE);
     }
-    addr.sin_port = htons(PORT);
+
+    if (argc == 6) {
+        addr.sin_port = htons((uint16_t) atoi(argv[5]));
+    } else {
+        addr.sin_port = htons(PORT);
+    }
 
     printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
     
@@ -318,11 +323,9 @@ void sendFile() {
         memset(response, 0, sizeof(response));
         bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
         buildDataPackage(response, fileBuffer, bytesRead, blockN);
-        printf("%ld \n", bytesRead);
         received = 0;
         retries = 0;
         while (received == 0 && retries < MAX_RETRIES) {
-            printf("HOLA\n");
             int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &addr, sizeof(src_addr));
             if (n == -1) {
                 perror("Error al enviar");
@@ -341,19 +344,18 @@ void sendFile() {
                     perror("Error en recvfrom");
                 }
             } else {
-                printf("Bloque %d recibido\n", (short)((ackBuf[2] << 8) | ackBuf[3]));
                 ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]); 
                 if (ackBlock != blockN || ackBuf[1] != 4) {
-                    if (ackBlock < blockN) {
+                    retries = 0;
+                    /* if (ackBlock < blockN) {
                         retries = 0;
                     } else {
                         printf("%X | %X\n", ackBuf[2], ackBuf[3]);
                         printf("Error en el acknowledge. Bloque: %d. Opcode: %c%c. %s", ackBlock, ackBuf[0], ackBuf[1], ackBuf);
                         perror("Error");
                         exit(1);
-                    }
+                    } */
                 } else {
-                    printf("RECIBI ACK\n");
                     received = 1;
                 }
             }         
@@ -365,8 +367,6 @@ void sendFile() {
             done = 1;
             break;
         }
-        /* int randSleep = rand() % (5 + 1 - 0) + 0;
-        sleep(randSleep); */
     }
     
 
