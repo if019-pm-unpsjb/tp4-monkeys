@@ -16,6 +16,7 @@
 #define MAX_RETRIES 10
 #define DEFAULT_FILENAME "test.txt"
 #define DEFAULT_DEST "test2.txt"
+#define DEFAULT_REQ 1
 
 // Tamaño del buffer en donde se reciben los mensajes. Debería ser el tamaño de tftp_packet creo
 #define BUFSIZE 100
@@ -32,6 +33,7 @@ socklen_t src_addr_len;
 unsigned short ackBlock;
 unsigned char dataBuffer[516];
 socklen_t src_addr_len;
+char filepath[150];
 
 void handler(int signal)
 {
@@ -49,6 +51,7 @@ void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size
 struct sockaddr_in addr;
 char * filename;
 char * destFilename;
+int reqType;
 unsigned char str[202];
 unsigned char response[516];
 size_t bytesRead;
@@ -76,9 +79,9 @@ int main(int argc, char* argv[])
     // Estructura con la dirección donde escuchará el servidor.
     memset(&addr, 0, sizeof(struct sockaddr_in));
     addr.sin_family = AF_INET;
-    if (argc == 5) {
-        addr.sin_port = htons((uint16_t) atoi(argv[4]));
-        inet_aton(argv[3], &(addr.sin_addr));
+    if (argc == 6) {
+        addr.sin_port = htons((uint16_t) atoi(argv[5]));
+        inet_aton(argv[4], &(addr.sin_addr));
     } else {
         addr.sin_port = htons(0);
         inet_aton(IP, &(addr.sin_addr));
@@ -104,16 +107,23 @@ int main(int argc, char* argv[])
 
     printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
     
-    if (argc >= 2) {
+    if (argc >= 4) {
         filename = argv[1];
         destFilename = argv[2];
+        reqType = atoi(argv[3]);
     } else {
         destFilename = DEFAULT_DEST;
         filename = DEFAULT_FILENAME;
+        reqType = DEFAULT_REQ;
     }
     // Recibo el archivo
-    //receiveFile(destFilename);
-    sendFile();
+    if (reqType == 1) {
+        receiveFile(destFilename);
+    } else if (reqType == 2) {
+        sendFile();
+    } else {
+        printf("Not implemented.\n");
+    }
     close(fd);
     exit(EXIT_SUCCESS);
 }
@@ -151,7 +161,10 @@ void sendAckPackage(unsigned short block) {
 void receiveFile(char * destFilename) {
     nextBlock = 1;
     // Desp le tendría que poner en los argumentos
-    file = fopen(destFilename, "wb");
+
+    strcpy(filepath, "files/");
+    strcat(filepath, destFilename);
+    file = fopen(filepath, "wb");
     if (file == NULL) {
         perror("Error al abrir el archivo");
         exit(1);
@@ -243,7 +256,10 @@ void waitDataAndSend() {
 
 
 void sendFile() {
-    file = fopen(filename, "r");
+
+    strcpy(filepath, "files/");
+    strcat(filepath, filename);
+    file = fopen(filepath, "r");
     if (file == NULL) {
         perror("Error al abrir el archivo");
         exit(1);
@@ -255,7 +271,7 @@ void sendFile() {
     opcode[1] = 2;
     char mode[100] = "NETASCII";
 
-    buildRequestPackage(str, opcode, filename, mode);
+    buildRequestPackage(str, opcode, destFilename, mode);
 
     unsigned char ackBuf[4];
 

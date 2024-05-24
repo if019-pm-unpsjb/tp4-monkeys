@@ -55,6 +55,7 @@ unsigned short nextBlock = 1;
 FILE *file;
 unsigned char dataBuffer[516];
 unsigned short receivedBlock;
+char filepath[150];
 
 void sendAckPackage(unsigned short block) {
     unsigned char str[4];
@@ -147,20 +148,19 @@ int main(int argc, char* argv[])
                 } else if (opcode[1] != 4) {
                     received = 1;
                 }
-
-                file = fopen(filename, "r");
-                if (file == NULL) {
-                    printf("Error %s\n", filename);
-                    sendErrorPackage((unsigned char *)"Error: el archivo solicitado no existe o no tenés permisos.\n");
-                    memset(filename, 0, sizeof(filename));
-                    received = 0;
-                }
-
             }
         }
 
         if (opcode[1] == 1) {
-            printf("Me llegó un Read Request %d\n", opcode[1]);
+            strcpy(filepath, "files/");
+            strcat(filepath, filename);
+            file = fopen(filepath, "r");
+            if (file == NULL) {
+                printf("Error %s\n", filename);
+                sendErrorPackage((unsigned char *)"Error: el archivo solicitado no existe o no tenés permisos.\n");
+                memset(filename, 0, sizeof(filename));
+                received = 0;
+            }
             unsigned char fileBuffer[512] = {0};
             int done = 0;
             while (done == 0) {
@@ -182,8 +182,6 @@ int main(int argc, char* argv[])
                 break;
             }
         } else {
-            printf("Me llegó un Write Request %d\n", opcode[1]);
-            //sendErrorPackage((unsigned char *)"Not implemented.");
             receiveData();
         }
         
@@ -257,7 +255,10 @@ void sendDataAndWait() {
 
 void receiveData() {
     // Desp le tendría que poner en los argumentos
-    file = fopen((char *) "testwrite.txt", "wb");
+
+    strcpy(filepath, "files/");
+    strcat(filepath, filename);
+    file = fopen(filepath, "wb");
     if (file == NULL) {
         perror("Error al abrir el archivo");
         exit(1);
