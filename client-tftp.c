@@ -30,6 +30,8 @@ int retries = 0;
 struct sockaddr_in src_addr;
 socklen_t src_addr_len;
 unsigned short ackBlock;
+unsigned char dataBuffer[516];
+socklen_t src_addr_len;
 
 void handler(int signal)
 {
@@ -40,12 +42,13 @@ void handler(int signal)
 void waitDataAndSend();
 void buildRequestPackage(unsigned char * str, char opcode[2], char filename[100], char mode[100]);
 void receiveFile(char * destFilename);
+void sendFile();
 void sendAckPackage(unsigned short block);
 void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN);
 
 struct sockaddr_in addr;
-char * destFilename;
 char * filename;
+char * destFilename;
 unsigned char str[202];
 unsigned char response[516];
 size_t bytesRead;
@@ -109,8 +112,8 @@ int main(int argc, char* argv[])
         filename = DEFAULT_FILENAME;
     }
     // Recibo el archivo
-    receiveFile(destFilename);
-    
+    //receiveFile(destFilename);
+    sendFile();
     close(fd);
     exit(EXIT_SUCCESS);
 }
@@ -171,8 +174,6 @@ void receiveFile(char * destFilename) {
 void waitDataAndSend() {
     for(;;) {
         // Me quedo esperando el paquete de datos
-        unsigned char dataBuffer[516];
-        socklen_t src_addr_len;
         int received = 0;
         int retries = 0;
         ssize_t receivedBytes;
@@ -204,6 +205,7 @@ void waitDataAndSend() {
                 receivedBlock = (short) ((dataBuffer[2] << 8) | dataBuffer[3]);
                 if (receivedBlock != nextBlock) {
                     if (receivedBlock < nextBlock) {
+                        sendAckPackage(nextBlock - 1);
                         printf("Recibí otro bloque pero sigo %d %d\n", receivedBlock,nextBlock);
                     } else {
                         // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
@@ -229,13 +231,127 @@ void waitDataAndSend() {
         // Si la data es menos de 512 entonces ya terminé (y ya mandé el acknowledge)
         if (receivedBytes < 516) {
             printf("Dejo de mandarte!\n");
+            fclose(file);
             break;
         }
         // Duermo un random de 0 a 3
-        /* int randSleep = rand() % (5 + 1 - 0) + 0;
+        /* int randSleep = rand() % (2 + 1 - 0) + 0;
         sleep(randSleep); */
         nextBlock++;
     }
 }
 
 
+void sendFile() {
+    file = fopen(filename, "r");
+    if (file == NULL) {
+        perror("Error al abrir el archivo");
+        exit(1);
+    }
+
+    // Armo el primer paquete de Read Request
+    char opcode[2];
+    opcode[0] = 0;
+    opcode[1] = 2;
+    char mode[100] = "NETASCII";
+
+    buildRequestPackage(str, opcode, filename, mode);
+
+    unsigned char ackBuf[4];
+
+    received = 0;
+    retries = 0;
+    ssize_t receivedBytes;
+    // Mando el primer paquete de Write Request y espero acknowledge    
+    while (received == 0 && retries < MAX_RETRIES) {
+        sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
+
+        receivedBytes = recvfrom(fd, (char *) &ackBuf, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
+        
+        if (ackBuf[1] == 5) {
+            printf("%s\n", &ackBuf[2]);
+            exit(1);
+        }
+
+        if (receivedBytes == -1) {
+            if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                retries++;
+                if (retries == MAX_RETRIES) {
+                    perror("Max retries reached");
+                    exit(1);
+                }
+            } else {
+                perror("Error en recvfrom");
+                exit(EXIT_FAILURE);
+            }
+        } else {
+            if (ackBuf[1] == 4) {
+                received = 1;
+                printf("Recibí ack de la req.\n");
+            }
+        }
+    }
+
+    retries = 0;
+    int blockN = 1;
+    int done = 0;
+
+    unsigned char fileBuffer[512] = {0};
+    while (done == 0) {
+        memset(fileBuffer, 0, sizeof(fileBuffer));
+        memset(response, 0, sizeof(response));
+        bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
+        buildDataPackage(response, fileBuffer, bytesRead, blockN);
+        printf("%ld \n", bytesRead);
+        received = 0;
+        retries = 0;
+        while (received == 0 && retries < MAX_RETRIES) {
+            printf("HOLA\n");
+            int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &addr, sizeof(src_addr));
+            if (n == -1) {
+                perror("Error al enviar");
+                exit(1);
+            }
+            n = recvfrom(fd, (char *) &ackBuf, 4, 0, (struct sockaddr*) &addr, &src_addr_len);
+            if (n == -1) {
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    printf("recvfrom timed out\n");
+                    retries++;
+                    if (retries == MAX_RETRIES) {
+                        perror("Max retries reached");
+                        exit(1);
+                    }
+                } else {
+                    perror("Error en recvfrom");
+                }
+            } else {
+                printf("Bloque %d recibido\n", (short)((ackBuf[2] << 8) | ackBuf[3]));
+                ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]); 
+                if (ackBlock != blockN || ackBuf[1] != 4) {
+                    if (ackBlock < blockN) {
+                        retries = 0;
+                    } else {
+                        printf("%X | %X\n", ackBuf[2], ackBuf[3]);
+                        printf("Error en el acknowledge. Bloque: %d. Opcode: %c%c. %s", ackBlock, ackBuf[0], ackBuf[1], ackBuf);
+                        perror("Error");
+                        exit(1);
+                    }
+                } else {
+                    printf("RECIBI ACK\n");
+                    received = 1;
+                }
+            }         
+        }
+
+        blockN++;
+        if (bytesRead < 512) {
+            printf("Dejo de escucharte!\n");
+            done = 1;
+            break;
+        }
+        /* int randSleep = rand() % (5 + 1 - 0) + 0;
+        sleep(randSleep); */
+    }
+    
+
+}

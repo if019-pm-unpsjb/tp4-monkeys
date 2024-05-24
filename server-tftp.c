@@ -29,6 +29,10 @@ void sendDataAndWait();
 void receiveData();
 void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN);
 void sendErrorPackage(unsigned char * message);
+void sendAckPackage(unsigned short block);
+void waitDataAndSend();
+
+
 void handler(int signal)
 {
     close(fd);
@@ -45,8 +49,21 @@ unsigned short ackBlock;
 int received = 0;
 int retries = 0;
 size_t bytesRead;
+char filename[100] = "";
+char opcode[2] = "";
+unsigned short nextBlock = 1;
+FILE *file;
+unsigned char dataBuffer[516];
+unsigned short receivedBlock;
 
-
+void sendAckPackage(unsigned short block) {
+    unsigned char str[4];
+    str[0] = 0;
+    str[1] = 4;
+    str[2] = (unsigned char)((block >> 8) & 0xFF);
+    str[3] = (unsigned char)(block & 0xFF);
+    sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &src_addr, sizeof(src_addr));    
+}
 
 int main(int argc, char* argv[])
 {
@@ -89,13 +106,10 @@ int main(int argc, char* argv[])
         perror("bind");
         exit(EXIT_FAILURE);
     }
-
     
     unsigned char buf[BUFSIZE];
 
     received = 0;
-
-    FILE *file;
     for (;;) {
         printf("Escuchando en %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
         memset(&src_addr, 0, sizeof(struct sockaddr_in));
@@ -104,8 +118,6 @@ int main(int argc, char* argv[])
         blockN = 1;
         retries = 0;
         received = 0;
-        char filename[100] = "";
-        char opcode[2] = "";
         while (received == 0) {
             ssize_t n = recvfrom(fd, (char *) &buf, BUFSIZE, 0, (struct sockaddr*) &src_addr, &src_addr_len);
 
@@ -171,8 +183,8 @@ int main(int argc, char* argv[])
             }
         } else {
             printf("Me llegó un Write Request %d\n", opcode[1]);
-            sendErrorPackage((unsigned char *)"Not implemented.");
-            //receiveData();
+            //sendErrorPackage((unsigned char *)"Not implemented.");
+            receiveData();
         }
         
     }
@@ -240,5 +252,83 @@ void sendDataAndWait() {
                 received = 1;
             }
         }                
+    }
+}
+
+void receiveData() {
+    // Desp le tendría que poner en los argumentos
+    file = fopen((char *) "testwrite.txt", "wb");
+    if (file == NULL) {
+        perror("Error al abrir el archivo");
+        exit(1);
+    }
+    nextBlock = 1;
+    sendAckPackage(0);
+
+    waitDataAndSend();
+    return;
+}
+
+void waitDataAndSend() {
+    for(;;) {
+        // Me quedo esperando el paquete de datos
+        int received = 0;
+        int retries = 0;
+        ssize_t receivedBytes;
+        while (received == 0 && retries < MAX_RETRIES) {
+            
+            receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &src_addr, &src_addr_len);
+            
+            if (dataBuffer[1] == 5) {
+                printf("%s\n", &dataBuffer[2]);
+                exit(1);
+            }
+
+            if (receivedBytes == -1) {
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    retries++;
+
+                    if (retries == MAX_RETRIES) {
+                        perror("Max retries reached");
+                        exit(1);
+                    }
+                } else {
+                    perror("Error en recvfrom");
+                    exit(EXIT_FAILURE);
+                }
+            } else {
+                receivedBlock = (short) ((dataBuffer[2] << 8) | dataBuffer[3]);
+                if (receivedBlock != nextBlock) {
+                    if (receivedBlock < nextBlock) {
+                        printf("Recibí otro bloque pero sigo %d %d\n", receivedBlock,nextBlock);
+                    } else {
+                        // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
+                        printf("Recibí otro bloque %c %d %d", receivedBlock, nextBlock, dataBuffer[1]);
+                        exit(1);
+                    }
+                } else {
+                    received = 1;
+                    retries = 0;
+                }
+            }            
+        }
+
+        // Lo recibí bien, escribo en el archivo
+        fwrite(dataBuffer + 4, sizeof(unsigned char), receivedBytes - 4, file);
+        memset(dataBuffer, 0, sizeof(dataBuffer));
+
+        // Mando el paquete de acknowledge al servidor
+        sendAckPackage(nextBlock);
+
+        // Si la data es menos de 512 entonces ya terminé (y ya mandé el acknowledge)
+        if (receivedBytes < 516) {
+            printf("Dejo de mandarte!\n");
+            fclose(file);
+            break;
+        }
+        // Duermo un random de 0 a 3
+        /* int randSleep = rand() % (2 + 1 - 0) + 0;
+        sleep(randSleep); */
+        nextBlock++;
     }
 }
