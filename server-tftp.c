@@ -12,7 +12,7 @@
 #define PORT 8888
 #define IP   "127.0.0.1"
 #define BUFSIZE 100
-#define INITIAL_TIMEOUT_SEC 0
+#define INITIAL_TIMEOUT_SEC 1
 #define MAX_RETRIES 5
 
 static int fd;
@@ -26,6 +26,7 @@ struct tftp_packet {
 };
 
 void sendDataAndWait();
+void receiveData();
 void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN);
 void sendErrorPackage(unsigned char * message);
 void handler(int signal)
@@ -33,6 +34,8 @@ void handler(int signal)
     close(fd);
     exit(EXIT_SUCCESS);
 }
+
+
 
 struct sockaddr_in src_addr;
 socklen_t src_addr_len;
@@ -42,6 +45,8 @@ unsigned short ackBlock;
 int received = 0;
 int retries = 0;
 size_t bytesRead;
+
+
 
 int main(int argc, char* argv[])
 {
@@ -100,6 +105,7 @@ int main(int argc, char* argv[])
         retries = 0;
         received = 0;
         char filename[100] = "";
+        char opcode[2] = "";
         while (received == 0) {
             ssize_t n = recvfrom(fd, (char *) &buf, BUFSIZE, 0, (struct sockaddr*) &src_addr, &src_addr_len);
 
@@ -113,7 +119,6 @@ int main(int argc, char* argv[])
                 }
             } else {
                 // Obtengo los datos del paquete
-                char opcode[2] = "";
                 opcode[0] = (buf[0]);
                 opcode[1] = (buf[1]);
 
@@ -124,7 +129,7 @@ int main(int argc, char* argv[])
                     i++;
                     filenameSize++;
                 }
-                if (opcode[1] != 1 && opcode[1] != 4) {
+                if (opcode[1] != 1 && opcode[1] != 2 && opcode[1] != 4) {
                     printf("Operation not implemented %d\n", opcode[1]);
                     return 1;
                 } else if (opcode[1] != 4) {
@@ -142,26 +147,34 @@ int main(int argc, char* argv[])
             }
         }
 
-        unsigned char fileBuffer[512] = {0};
-        int done = 0;
-        while (done == 0) {
-            memset(fileBuffer, 0, sizeof(fileBuffer));
-            memset(response, 0, sizeof(response));
-            bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
-            buildDataPackage(response, fileBuffer, bytesRead, blockN);
-            sendDataAndWait();
-            
-            blockN++;
-            if (bytesRead < 512) {
-                printf("Dejo de escucharte!\n");
-                done = 1;
+        if (opcode[1] == 1) {
+            printf("Me llegó un Read Request %d\n", opcode[1]);
+            unsigned char fileBuffer[512] = {0};
+            int done = 0;
+            while (done == 0) {
+                memset(fileBuffer, 0, sizeof(fileBuffer));
+                memset(response, 0, sizeof(response));
+                bytesRead = fread(fileBuffer, 1, sizeof(fileBuffer), file);
+                buildDataPackage(response, fileBuffer, bytesRead, blockN);
+                sendDataAndWait();
+                
+                blockN++;
+                if (bytesRead < 512) {
+                    printf("Dejo de escucharte!\n");
+                    done = 1;
+                    break;
+                }
+            }
+            if (retries >= MAX_RETRIES) {
+                printf("Máximo número de reintentos alcanzado. No se puede enviar el archivo.\n");
                 break;
             }
+        } else {
+            printf("Me llegó un Write Request %d\n", opcode[1]);
+            sendErrorPackage((unsigned char *)"Not implemented.");
+            //receiveData();
         }
-        if (retries >= MAX_RETRIES) {
-            printf("Máximo número de reintentos alcanzado. No se puede enviar el archivo.\n");
-            break;
-        }
+        
     }
 
     close(fd);
@@ -190,6 +203,8 @@ void sendDataAndWait() {
     received = 0;
     retries = 0;
     while (received == 0 && retries <= MAX_RETRIES) {
+        /* int randSleep = rand() % (5 + 1 - 0) + 0;
+        sleep(randSleep); */
         int n = sendto(fd, (char *) &response, bytesRead + 4, 0, (struct sockaddr*) &src_addr, sizeof(src_addr));
         if (n == -1) {
             perror("Error al enviar");
@@ -210,7 +225,7 @@ void sendDataAndWait() {
                 perror("Error en recvfrom");
             }
         } else {
-            printf("Bloque %d recibido\n", (short)((ackBuf[2] << 8) | ackBuf[3]));
+            //printf("Bloque %d recibido\n", (short)((ackBuf[2] << 8) | ackBuf[3]));
             ackBlock = (short)((ackBuf[2] << 8) | ackBuf[3]); 
             if (ackBlock != blockN || ackBuf[1] != 4) {
                 if (ackBlock < blockN) {

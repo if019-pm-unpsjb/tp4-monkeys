@@ -7,10 +7,13 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <signal.h>
+#include <errno.h>
 
 #define PORT 8888
 #define IP   "127.0.0.1"
 
+#define INITIAL_TIMEOUT_SEC 1
+#define MAX_RETRIES 10
 #define DEFAULT_FILENAME "test.txt"
 #define DEFAULT_DEST "test2.txt"
 
@@ -19,16 +22,14 @@
 #define BLOCKSIZE 512
 
 static int fd;
-
-
-// No lo usamos, podríamos pensar en hacerlo
-/* struct tftp_packet {
-    short opcode;
-    char filename[25];
-    char eof1;
-    char mode[25];
-    char eof2;
-}; */
+FILE *file;
+unsigned short nextBlock = 1;
+unsigned short receivedBlock;
+int received = 0;
+int retries = 0;
+struct sockaddr_in src_addr;
+socklen_t src_addr_len;
+unsigned short ackBlock;
 
 void handler(int signal)
 {
@@ -36,13 +37,26 @@ void handler(int signal)
     exit(EXIT_SUCCESS);
 }
 
+void waitDataAndSend();
 void buildRequestPackage(unsigned char * str, char opcode[2], char filename[100], char mode[100]);
 void receiveFile(char * destFilename);
 void sendAckPackage(unsigned short block);
+void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN);
 
 struct sockaddr_in addr;
 char * destFilename;
 char * filename;
+unsigned char str[202];
+unsigned char response[516];
+size_t bytesRead;
+
+void buildDataPackage(unsigned char * response, unsigned char * fileBuffer, size_t bytesRead, unsigned short blockN) {
+    response[0] = 0;
+    response[1] = 3;
+    response[2] = (unsigned char)((blockN >> 8) & 0xFF);
+    response[3] = (unsigned char)(blockN & 0xFF);
+    memcpy(response + 4, fileBuffer, bytesRead);
+}
 
 int main(int argc, char* argv[])
 {
@@ -75,13 +89,14 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
-    // Asocia el socket con la dirección indicada. Tradicionalmente esta 
-    // operación se conoce como "asignar un nombre al socket".
-    /* int b = bind(fd, (struct sockaddr*) &addr, sizeof(addr));
-    if (b == -1) {
-        perror("bind");
+    struct timeval timeout;
+    timeout.tv_sec = INITIAL_TIMEOUT_SEC;
+    timeout.tv_usec = 0;
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt SO_RCVTIMEO");
+        close(fd);
         exit(EXIT_FAILURE);
-    } */
+    }
     addr.sin_port = htons(PORT);
 
     printf("Mandando a %s:%d ...\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
@@ -131,9 +146,7 @@ void sendAckPackage(unsigned short block) {
 }
 
 void receiveFile(char * destFilename) {
-    FILE *file;
-    unsigned short nextBlock = 1;
-    unsigned short receivedBlock;
+    nextBlock = 1;
     // Desp le tendría que poner en los argumentos
     file = fopen(destFilename, "wb");
     if (file == NULL) {
@@ -147,19 +160,24 @@ void receiveFile(char * destFilename) {
     opcode[1] = 1;
     char mode[100] = "NETASCII";
 
-    unsigned char str[202];
     buildRequestPackage(str, opcode, filename, mode);
 
     // Mando el primer paquete de Read Request    
     sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
+    waitDataAndSend();
+    return;
+}
 
+void waitDataAndSend() {
     for(;;) {
         // Me quedo esperando el paquete de datos
         unsigned char dataBuffer[516];
         socklen_t src_addr_len;
         int received = 0;
+        int retries = 0;
         ssize_t receivedBytes;
-        while (received == 0) {
+        while (received == 0 && retries < MAX_RETRIES) {
+            
             receivedBytes = recvfrom(fd, (char *) &dataBuffer, 516, 0, (struct sockaddr*) &addr, &src_addr_len);
             
             if (dataBuffer[1] == 5) {
@@ -167,18 +185,38 @@ void receiveFile(char * destFilename) {
                 exit(1);
             }
 
-            receivedBlock = (short) ((dataBuffer[2] << 8) | dataBuffer[3]);
-            if (receivedBlock != nextBlock) {
-                if (receivedBlock < nextBlock) {
-                    printf("Recibí otro bloque pero sigo %d %d\n", receivedBlock,nextBlock);
+            if (receivedBytes == -1) {
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
+                    retries++;
+                    if (nextBlock == 1) {
+                        sendto(fd, (char *) &str, sizeof(str), 0, (struct sockaddr*) &addr, sizeof(addr));
+                    }
+
+                    if (retries == MAX_RETRIES) {
+                        perror("Max retries reached");
+                        exit(1);
+                    }
                 } else {
-                    // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
-                    printf("Recibí otro bloque %c %d %d", receivedBlock,nextBlock, dataBuffer[1]);
-                    exit(1);
+                    perror("Error en recvfrom");
+                    exit(EXIT_FAILURE);
                 }
             } else {
-                received = 1;
+                receivedBlock = (short) ((dataBuffer[2] << 8) | dataBuffer[3]);
+                if (receivedBlock != nextBlock) {
+                    if (receivedBlock < nextBlock) {
+                        printf("Recibí otro bloque pero sigo %d %d\n", receivedBlock,nextBlock);
+                    } else {
+                        // Por ahora salgo, después tendría que manejarlo (aunque creo que nunca debería pasar)
+                        printf("Recibí otro bloque %c %d %d", receivedBlock,nextBlock, dataBuffer[1]);
+                        exit(1);
+                    }
+                } else {
+                    received = 1;
+                    retries = 0;
+                }
             }
+
+            
         }
 
         // Lo recibí bien, escribo en el archivo
@@ -198,5 +236,6 @@ void receiveFile(char * destFilename) {
         sleep(randSleep); */
         nextBlock++;
     }
-    return;
 }
+
+
