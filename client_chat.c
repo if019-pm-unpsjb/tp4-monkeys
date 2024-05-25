@@ -1,56 +1,82 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
+#include <string.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
-#define PORT 8080
-#define BUFFER_SIZE 1024
+#define MAX_LINE 100
 
-void *receive_messages(void *arg);
+void* receive_messages(void* args);
 
-int main() {
-    int sock;
+int main(int argc, char *argv[])
+{
+    pthread_t thread;
     struct sockaddr_in server_addr;
-    char buffer[BUFFER_SIZE];
-    pthread_t recv_thread;
+    int sock;
+    char username[20];
+    char buffer[MAX_LINE];
 
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        perror("Socket creation failed");
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <server_ip> <username>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-    server_addr.sin_addr.s_addr = INADDR_ANY;
+    strcpy(username, argv[2]);
 
-    if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        perror("Connect failed");
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&server_addr, 0, sizeof(struct sockaddr_in));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(8080);
+    inet_aton(argv[1], &server_addr.sin_addr);
+
+    if (connect(sock, (struct sockaddr*) &server_addr, sizeof(server_addr)) == -1) {
+        perror("connect");
         close(sock);
         exit(EXIT_FAILURE);
     }
 
-    pthread_create(&recv_thread, NULL, receive_messages, &sock);
+    // Send username to server
+    send(sock, username, strlen(username), 0);
+
+    if (pthread_create(&thread, NULL, receive_messages, (void*) &sock) != 0) {
+        perror("pthread_create");
+        close(sock);
+        exit(EXIT_FAILURE);
+    }
 
     while (1) {
-        fgets(buffer, BUFFER_SIZE, stdin);
-        send(sock, buffer, strlen(buffer), 0);
+        printf("You: ");
+        fflush(stdout);
+        if (fgets(buffer, MAX_LINE, stdin) == NULL) {
+            break;
+        }
+        buffer[strcspn(buffer, "\n")] = '\0';
+        if (send(sock, buffer, strlen(buffer), 0) == -1) {
+            break;
+        }
     }
 
     close(sock);
     return 0;
 }
 
-void *receive_messages(void *arg) {
-    int sock = *((int*)arg);
-    char buffer[BUFFER_SIZE];
-    int len;
+void* receive_messages(void* args) {
+    int sock = *(int*) args;
+    char buffer[MAX_LINE];
+    int bytes_received;
 
-    while ((len = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
-        buffer[len] = '\0';
-        printf("%s", buffer);
+    while ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) > 0) {
+        buffer[bytes_received] = '\0';
+        printf("\r%s\nYou: ", buffer);
+        fflush(stdout);
     }
 
     return NULL;
