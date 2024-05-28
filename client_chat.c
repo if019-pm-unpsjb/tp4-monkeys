@@ -6,6 +6,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h> // Incluir esta cabecera
 
 #define MAX_LINE 100
 
@@ -59,8 +62,68 @@ int main(int argc, char *argv[])
             break;
         }
         buffer[strcspn(buffer, "\n")] = '\0';
-        if (send(sock, buffer, strlen(buffer), 0) == -1) {
-            break;
+
+        if (strncmp(buffer, "/sendfile ", 10) == 0) {
+            char* filename = buffer + 10;
+            int file_fd = open(filename, O_RDONLY);
+            if (file_fd == -1) {
+                perror("open");
+                continue;
+            }
+
+            send(sock, buffer, strlen(buffer), 0);
+            struct stat file_stat;
+            if (fstat(file_fd, &file_stat) < 0) {
+                perror("fstat");
+                close(file_fd);
+                continue;
+            }
+
+            off_t file_size = file_stat.st_size;
+            send(sock, &file_size, sizeof(file_size), 0);
+
+            off_t offset = 0;
+            ssize_t sent_bytes = 0;
+            while (offset < file_size) {
+                sent_bytes = sendfile(sock, file_fd, &offset, file_size - offset);
+                if (sent_bytes <= 0) {
+                    perror("sendfile");
+                    break;
+                }
+            }
+
+            close(file_fd);
+        } else if (strncmp(buffer, "/getfile ", 9) == 0) {
+            send(sock, buffer, strlen(buffer), 0);
+
+            char* filename = buffer + 9;
+            int file_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (file_fd == -1) {
+                perror("open");
+                continue;
+            }
+
+            off_t file_size;
+            recv(sock, &file_size, sizeof(file_size), 0);
+
+            char file_buffer[4096];
+            ssize_t received_bytes = 0;
+            off_t remaining_bytes = file_size;
+            while (remaining_bytes > 0) {
+                received_bytes = recv(sock, file_buffer, sizeof(file_buffer), 0);
+                if (received_bytes <= 0) {
+                    perror("recv");
+                    break;
+                }
+                write(file_fd, file_buffer, received_bytes);
+                remaining_bytes -= received_bytes;
+            }
+
+            close(file_fd);
+        } else {
+            if (send(sock, buffer, strlen(buffer), 0) == -1) {
+                break;
+            }
         }
     }
 
