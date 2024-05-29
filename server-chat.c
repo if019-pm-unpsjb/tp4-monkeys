@@ -141,35 +141,11 @@ void removeDestUserFromMsg(char* str, char * newStr) {
     }
 }
 
-char* add_opcode(char *message, unsigned char code) {
-    // Obtener la longitud del mensaje original
-    size_t len = strlen(message);
-    
-    // Crear un nuevo buffer para el mensaje resultante
-    char *new_message = (char*)malloc(len + 2); // +1 para el code y +1 para el terminador nulo
-    
-    if (new_message == NULL) {
-        // Manejo de error si no se puede asignar memoria
-        fprintf(stderr, "Error: No se pudo asignar memoria\n");
-        exit(1);
-    }
-
-    // Agregar el code al principio del nuevo mensaje
-    new_message[0] = code;
-    
-    // Copiar el mensaje original después del code
-    strcpy(new_message + 1, message);
-    
-    return new_message;
-}
-
 void broadcast_message(char* message, struct client_info* sender) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (&clients[i] != sender) {
-            unsigned char code = 1;
-            char * newMessage = add_opcode(message, code);
-            send(clients[i].sock, newMessage, strlen(newMessage), 0);
+            send(clients[i].sock, message, strlen(message), 0);
         }
     }
     pthread_mutex_unlock(&clients_mutex);
@@ -179,80 +155,10 @@ void send_by_name(char * message, char * username) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (strcmp((char * ) &clients[i].username,username) == 0) {
-            unsigned char code = 1;
-            char * newMessage = add_opcode(message, code);
-            send(clients[i].sock, newMessage, strlen(newMessage), 0);
+            send(clients[i].sock, message, strlen(message), 0);
         }
     }
     pthread_mutex_unlock(&clients_mutex);
-}
-
-void send_file(char * message) {
-    printf("SEND FILE\n");
-    char * username = "alecapo";
-    char * filename = "test.txt";
-    int out_fd = -1;
-    printf("ACA?\n");
-    int in_fd = open(filename, O_RDONLY);
-    if (in_fd < 0) {
-        perror("Error al abrir el archivo");
-        return;
-    }
-    printf("%s\n", username);
-
-    pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < client_count; i++) {
-        if (strcmp((char * ) &clients[i].username, username) == 0) {
-            out_fd = clients[i].sock;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&clients_mutex);
-
-    pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < client_count; i++) {
-        if (strcmp(clients[i].username, username) == 0) {
-            out_fd = clients[i].sock;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&clients_mutex);
-
-    if (out_fd != -1) {
-        printf("SENDING FILE\n");
-
-        // Obtener el tamaño del archivo
-        off_t file_size = lseek(in_fd, 0, SEEK_END);
-        lseek(in_fd, 0, SEEK_SET);
-
-        // Crear un buffer para el encabezado
-        char header[9]; // 1 byte para el opcode y 8 bytes para el tamaño del archivo
-        header[0] = 2; // Opcode para transferencia de archivo
-        memcpy(header + 1, &file_size, sizeof(file_size));
-
-        // Enviar el encabezado
-        if (send(out_fd, header, sizeof(header), 0) < 0) {
-            perror("Error al enviar el encabezado del archivo");
-            close(in_fd);
-            return;
-        }
-
-        // Enviar el archivo usando sendfile
-        off_t offset = 0;
-        ssize_t sent_bytes;
-        while (offset < file_size) {
-            sent_bytes = sendfile(out_fd, in_fd, &offset, file_size - offset);
-            if (sent_bytes <= 0) {
-                perror("Error al enviar el archivo");
-                break;
-            }
-        }
-
-        close(in_fd);
-    } else {
-        printf("Usuario no encontrado\n");
-        close(in_fd);
-    }
 }
 
 void* handle_client(void* args) {
@@ -280,9 +186,6 @@ void* handle_client(void* args) {
         if (strcmp(dest, "A") == 0) {
             removeDestUserFromMsg(message, newMessage);
             broadcast_message(newMessage, client);
-        } else if (strcmp(dest, "sendfile") == 0) {
-            //removeDestUserFromMsg(message, newMessage);
-            send_file(newMessage);
         } else if (strcmp(dest, "") != 0) {
             removeDestUserFromMsg(message, newMessage);
             send_by_name(newMessage, dest);

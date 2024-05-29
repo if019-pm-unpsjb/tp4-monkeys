@@ -147,45 +147,9 @@ void* receive_messages(void* args) {
 
     while ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) > 0) {
         buffer[bytes_received] = '\0';
-        if (buffer[0] == 1) {
-            printf("\r%s\nYou: ", buffer);
-            fflush(stdout);
-        } else if (buffer[0] == 2) {
-            // Recibir el tamaño del archivo
-            printf("RECIBIENDO\n");
-            off_t file_size;
-            memcpy(&file_size, header + 1, sizeof(file_size));
-            receive_file(sock, file_size, "received_test.txt");
-        }
+        printf("\r%s\nYou: ", buffer);
+        fflush(stdout);
     }
 
     return NULL;
-}
-
-void receive_file(int sock, off_t file_size, const char *filename) {
-    ssize_t bytes_received;
-    char buffer[BUFFER_SIZE];
-
-    int out_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (out_fd < 0) {
-        perror("Error al abrir el archivo para escribir");
-        return;
-    }
-
-    // Recibir el archivo
-    off_t total_received = 0;
-    while (total_received < file_size) {
-        bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
-        if (bytes_received <= 0) {
-            perror("Error al recibir el archivo");
-            close(out_fd);
-            return;
-        }
-
-        write(out_fd, buffer, bytes_received);
-        total_received += bytes_received;
-    }
-
-    close(out_fd);
-    printf("Archivo recibido y guardado como %s\n", filename);
 }
