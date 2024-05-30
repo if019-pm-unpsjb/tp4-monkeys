@@ -2,144 +2,366 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <signal.h>
-#include <pthread.h>
+#include <fcntl.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h> 
 
-#define PORT 8888
-#define IP "127.0.0.1"
-#define BUFSIZE 1024
-#define BACKLOGSIZE 10
+#define MAX_LINE 100
+#define MAX_CLIENTS 10
+#define MAX_USRLEN 20
 
-static int server_fd;
+void* handle_client(void* args);
+void send_by_name(char * message, char * username);
 
-typedef struct {
-    int socket;
-    struct sockaddr_in address;
-    char username[50];
-} client_t;
+struct client_info {
+    struct sockaddr_in addr;
+    socklen_t addr_len;
+    int sock;
+    char username[MAX_USRLEN];
+};
 
-client_t *clients[BACKLOGSIZE];
+struct client_info clients[MAX_CLIENTS];
+int client_count = 0;
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+int server_sock, client_sock;
 
-void handle_client(int client_socket);
-void broadcast_message(char *message, int sender_socket);
-void send_private_message(char *message, char *receiver);
-void remove_client(int client_socket);
-void handle_file_transfer(int client_socket, char *message);
-void handle_sigint(int sig);
+void handler(int signal) {
+    for (int i = 0; i < client_count; i++) {
+        close(clients[i].sock);
+    }
+    close(server_sock);
+    exit(EXIT_SUCCESS);
+}
 
-int main(int argc, char *argv[]) {
-    signal(SIGINT, handle_sigint);
+int main(int argc, char *argv[])
+{
+    pthread_t thread;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_addr_len = sizeof(struct sockaddr_in);
+    signal(SIGTERM, handler);
 
-    struct sockaddr_in server_addr;
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
+    server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_sock == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
     }
 
+    memset(&server_addr, 0, sizeof(struct sockaddr_in));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-    inet_pton(AF_INET, IP, &server_addr.sin_addr);
+    server_addr.sin_port = htons(8080);
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+    if (bind(server_sock, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in)) == -1) {
         perror("bind");
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_fd, BACKLOGSIZE) == -1) {
+    if (listen(server_sock, MAX_CLIENTS) == -1) {
         perror("listen");
-        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
-    printf("Servidor escuchando en %s:%d...\n", IP, PORT);
+    printf("Server listening on port 8080\n");
 
     while (1) {
-        struct sockaddr_in client_addr;
-        socklen_t client_addr_len = sizeof(client_addr);
-        int client_socket = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-
-        if (client_socket == -1) {
+        client_sock = accept(server_sock, (struct sockaddr*) &client_addr, &client_addr_len);
+        if (client_sock == -1) {
             perror("accept");
             continue;
         }
 
-        pthread_t tid;
-        pthread_create(&tid, NULL, (void *)handle_client, (void *)(intptr_t)client_socket);
+        pthread_mutex_lock(&clients_mutex);
+        if (client_count >= MAX_CLIENTS) {
+            printf("Max clients reached. Connection rejected: %s:%d\n",
+                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            close(client_sock);
+        } else {
+            struct client_info* new_client = &clients[client_count++];
+            new_client->sock = client_sock;
+            new_client->addr = client_addr;
+            new_client->addr_len = client_addr_len;
+            pthread_create(&thread, NULL, handle_client, (void*) new_client);
+            pthread_detach(thread);
+        }
+        pthread_mutex_unlock(&clients_mutex);
     }
 
-    close(server_fd);
+    close(server_sock);
     return 0;
 }
 
-void handle_client(int client_socket) {
-    char buffer[BUFSIZE];
+
+void listConnectedUsers(void* args) {
+    struct client_info* client = (struct client_info*) args;
+
+    // Buffer para almacenar la lista de usuarios
+    char clientList[2048];
+    int offset = 0;
+
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp(clients[i].username, client->username) != 0) {
+            // Añadir el nombre de usuario al buffer
+            int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
+            offset += len;
+        }
+    }
+    printf("CLIENTS %s\n", clientList);
+    send(client->sock, clientList, strlen(clientList), 0);
+    pthread_mutex_unlock(&clients_mutex);
+
+}
+void getDestUser(const char* source, char* destination, size_t maxLen) {
+    size_t i = 0;
+    int j = 0;
+    while (source[j] != ' ') {
+        j++;
+    }
+    j++;
+
+    if (source[j] == ':') {
+        j++;
+    } else {
+        return;
+    }
+
+    while(source[j] != '\0' && i < maxLen - 1) {
+        if (source[j] == ' ') {
+            break;
+        }
+        *destination++ = source[j];
+        j++;
+    }
+    *destination = '\0';
+}
+
+void removeDestUserFromMsg(char* str, char * newStr) {
+    int j = 0;
+    int i = 0;
+    while (str[j] != ' ') {
+        newStr[i] = str[j];
+        j++;
+        i++;
+    }
+    j++;
+
+    while (str[j] != ' ') {
+        j++;
+    }
+
+    while (str[j] != '\0') {
+        newStr[i] = str[j];
+        i++;
+        j++;
+    }
+}
+
+void broadcast_message(char* message, struct client_info* sender) {
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] != sender) {
+            send(clients[i].sock, message, strlen(message), 0);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void send_by_name(char * message, char * username) {
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp((char * ) &clients[i].username,username) == 0) {
+            send(clients[i].sock, message, strlen(message), 0);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void send_opcode_by_name(unsigned short opcode, char * username) {
+    unsigned char str[2];
+    str[0] = 0;
+    str[1] = opcode;
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp((char * ) &clients[i].username,username) == 0) {
+            send(clients[i].sock, &str, sizeof(str), 0);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
+    unsigned char str[2];
+    str[0] = 0;
+    str[1] = opcode;
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] != sender) {
+            send(clients[i].sock, &str, sizeof(str), 0);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void broadcast_file(int file_fd, off_t file_size, struct client_info* sender) {
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] != sender) {
+            sendfile(clients[i].sock, file_fd, 0, file_size);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void send_file(char * message, struct client_info* sender) {
+    printf("MESSAGE %s\n", message);
+    char name[20] = "";
+    int i = 0;
+
+    while (message[i] != ' ' && message[i] != '\0') {
+        i++;
+    }
+    i++;
+    while (message[i] != ' ' && message[i] != '\0') {
+        i++;
+    }
+    i++;
+    int j = 0;
+    while (message[i] != ' ' && message[i] != '\0') {
+        name[j] = message[i];
+        i++;
+        j++;
+    }
+
+    printf("NAME %s\n", name);
+    broadcast_opcode(2, sender);
+
+    int file_fd = open(name, O_RDONLY);
+    if (file_fd == -1) {
+        perror("open");
+        return;
+    }
+
+    struct stat file_stat;
+    if (fstat(file_fd, &file_stat) < 0) {
+        perror("fstat");
+        close(file_fd);
+        return;
+    }
+
+    off_t file_size = file_stat.st_size;
+
+    broadcast_file(file_fd, file_size, sender);
+
+    close(file_fd);
+
+    /* send(sock, buffer, strlen(buffer), 0);
+    struct stat file_stat;
+    if (fstat(file_fd, &file_stat) < 0) {
+        perror("fstat");
+        close(file_fd);
+        continue;
+    }
+    char* filename = buffer + 10;
+    int file_fd = open(filename, O_RDONLY);
+    if (file_fd == -1) {
+        perror("open");
+        continue;
+    }
+
+    send(sock, buffer, strlen(buffer), 0);
+    struct stat file_stat;
+    if (fstat(file_fd, &file_stat) < 0) {
+        perror("fstat");
+        close(file_fd);
+        continue;
+    }
+
+    off_t file_size = file_stat.st_size;
+    send(sock, &file_size, sizeof(file_size), 0);
+
+    off_t offset = 0;
+    ssize_t sent_bytes = 0;
+    while (offset < file_size) {
+        sent_bytes = sendfile(sock, file_fd, &offset, file_size - offset);
+        if (sent_bytes <= 0) {
+            perror("sendfile");
+            break;
+        }
+    }
+
+    close(file_fd);
+    off_t file_size = file_stat.st_size;
+    send(sock, &file_size, sizeof(file_size), 0);
+
+    off_t offset = 0;
+    ssize_t sent_bytes = 0;
+    while (offset < file_size) {
+        sent_bytes = sendfile(sock, file_fd, &offset, file_size - offset);
+        if (sent_bytes <= 0) {
+            perror("sendfile");
+            break;
+        }
+    }
+
+    close(file_fd); */
+}
+
+void* handle_client(void* args) {
+    struct client_info* client = (struct client_info*) args;
+    char buffer[MAX_LINE];
     int bytes_received;
 
-    while ((bytes_received = recv(client_socket, buffer, BUFSIZE, 0)) > 0) {
+    // Receive username
+    bytes_received = recv(client->sock, client->username, sizeof(client->username), 0);
+    if (bytes_received <= 0) {
+        close(client->sock);
+        return NULL;
+    }
+    client->username[bytes_received] = '\0';
+
+    printf("New connection from %s:%d as %s\n", inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), client->username);
+
+    while ((bytes_received = recv(client->sock, buffer, MAX_LINE, 0)) > 0) {
         buffer[bytes_received] = '\0';
-        printf("Mensaje recibido: %s\n", buffer);
-
-        if (strncmp(buffer, "LOGIN", 5) == 0) {
-            // Handle login
-        } else if (strncmp(buffer, "LOGOUT", 6) == 0) {
-            // Handle logout
-        } else if (strncmp(buffer, "MSG", 3) == 0) {
-            // Handle message
-            broadcast_message(buffer, client_socket);
-        } else if (strncmp(buffer, "FILE", 4) == 0) {
-            // Handle file transfer
-            handle_file_transfer(client_socket, buffer);
+        char message[MAX_LINE + 50] = "";
+        char newMessage[MAX_LINE + 50] = "";
+        snprintf(message, sizeof(message), "%s: %s", client->username, buffer);
+        char dest[MAX_USRLEN] = "";
+        getDestUser(message, dest, MAX_USRLEN);
+        if (strcmp(dest, "A") == 0) {
+            broadcast_opcode(1, client);
+            removeDestUserFromMsg(message, newMessage);
+            broadcast_message(newMessage, client);
+        } else if (strcmp(dest, "listUsers") == 0) {
+            printf("LIST USRES\n");
+            listConnectedUsers(client);
+        } else if (strcmp(dest, "sendfile") == 0) {
+            send_file(message, client);
+        } else if (strcmp(dest, "") != 0) {
+            send_opcode_by_name(1, dest);
+            removeDestUserFromMsg(message, newMessage);
+            send_by_name(newMessage, dest);
+        } else {
+           printf("ERROR NO HAY DESTINATARIO");
         }
     }
 
-    close(client_socket);
-    remove_client(client_socket);
-}
-
-void broadcast_message(char *message, int sender_socket) {
+    // Remove client from list
     pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < BACKLOGSIZE; i++) {
-        if (clients[i] && clients[i]->socket != sender_socket) {
-            send(clients[i]->socket, message, strlen(message), 0);
-        }
-    }
-    pthread_mutex_unlock(&clients_mutex);
-}
-
-void send_private_message(char *message, char *receiver) {
-    pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < BACKLOGSIZE; i++) {
-        if (clients[i] && strcmp(clients[i]->username, receiver) == 0) {
-            send(clients[i]->socket, message, strlen(message), 0);
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] == client) {
+            clients[i] = clients[--client_count];
             break;
         }
     }
     pthread_mutex_unlock(&clients_mutex);
-}
 
-void remove_client(int client_socket) {
-    pthread_mutex_lock(&clients_mutex);
-    for (int i = 0; i < BACKLOGSIZE; i++) {
-        if (clients[i] && clients[i]->socket == client_socket) {
-            clients[i] = NULL;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&clients_mutex);
-}
-
-void handle_file_transfer(int client_socket, char *message) {
-    // Handle file transfer logic
-}
-
-void handle_sigint(int sig) {
-    close(server_fd);
-    exit(EXIT_SUCCESS);
+    printf("%s disconnected\n", client->username);
+    close(client->sock);
+    return NULL;
 }

@@ -24,12 +24,7 @@ server-echo-connection: server-echo-connection.c
 client-tftp: client-tftp.c
 	$(CC) -o bin/$@ $^ $(CFLAGS)
 
-
-server_chat: server_chat.c
-	$(CC) -o bin/$@ $^ $(CFLAGS)
-
-
-client_chat: client_chat.c
+client-chat: client-chat.c
 	$(CC) -o bin/$@ $^ $(CFLAGS)
 
 .PHONY: clean
