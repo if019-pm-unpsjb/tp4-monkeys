@@ -140,15 +140,63 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+void write_fd_to_file(int fd, const char* filename) {
+    int output_fd;
+    ssize_t bytes_read, bytes_written;
+    char buffer[BUFFER_SIZE];
+
+    // Abrir el archivo de salida para escritura
+    output_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    if (output_fd < 0) {
+        perror("Error abriendo el archivo de salida");
+        exit(EXIT_FAILURE);
+    }
+
+    // Leer del fd y escribir en el archivo de salida
+    while ((bytes_read = read(fd, buffer, BUFFER_SIZE)) > 0) {
+        ssize_t total_written = 0;
+        while (total_written < bytes_read) {
+            bytes_written = write(output_fd, buffer + total_written, bytes_read - total_written);
+            if (bytes_written < 0) {
+                perror("Error escribiendo en el archivo de salida");
+                close(output_fd);
+                exit(EXIT_FAILURE);
+            }
+            total_written += bytes_written;
+        }
+    }
+
+    if (bytes_read < 0) {
+        perror("Error leyendo del file descriptor");
+    }
+
+    // Cerrar el archivo de salida
+    close(output_fd);
+}
+
 void* receive_messages(void* args) {
     int sock = *(int*) args;
     char buffer[MAX_LINE];
     int bytes_received;
 
     while ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) > 0) {
-        buffer[bytes_received] = '\0';
-        printf("\r%s\nYou: ", buffer);
-        fflush(stdout);
+        if (buffer[1] == 1) {
+            printf("ESPERANDO MENSAJE\n");
+            if ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) < 0) {
+                break;
+            }
+            buffer[bytes_received] = '\0';
+            printf("\r%s\nYou: ", buffer);
+            fflush(stdout);
+        } else {
+            printf("ESPERANDO ARCHIVO\n");
+            if ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) < 0) {
+                break;
+            }
+            // Escribir el archivo
+            write_fd_to_file(sock, (char*) "test2.txt");
+        }
+        memset(buffer, 0, sizeof(buffer));
     }
 
     return NULL;

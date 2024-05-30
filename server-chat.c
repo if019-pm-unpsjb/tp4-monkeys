@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/sendfile.h>
+#include <sys/stat.h> 
 
 #define MAX_LINE 100
 #define MAX_CLIENTS 10
@@ -23,8 +24,6 @@ struct client_info {
     int sock;
     char username[MAX_USRLEN];
 };
-
-
 
 struct client_info clients[MAX_CLIENTS];
 int client_count = 0;
@@ -96,6 +95,27 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+
+void listConnectedUsers(void* args) {
+    struct client_info* client = (struct client_info*) args;
+
+    // Buffer para almacenar la lista de usuarios
+    char clientList[2048];
+    int offset = 0;
+
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp(clients[i].username, client->username) != 0) {
+            // Añadir el nombre de usuario al buffer
+            int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
+            offset += len;
+        }
+    }
+    printf("CLIENTS %s\n", clientList);
+    send(client->sock, clientList, strlen(clientList), 0);
+    pthread_mutex_unlock(&clients_mutex);
+
+}
 void getDestUser(const char* source, char* destination, size_t maxLen) {
     size_t i = 0;
     int j = 0;
@@ -161,6 +181,136 @@ void send_by_name(char * message, char * username) {
     pthread_mutex_unlock(&clients_mutex);
 }
 
+void send_opcode_by_name(unsigned short opcode, char * username) {
+    unsigned char str[2];
+    str[0] = 0;
+    str[1] = opcode;
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp((char * ) &clients[i].username,username) == 0) {
+            send(clients[i].sock, &str, sizeof(str), 0);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
+    unsigned char str[2];
+    str[0] = 0;
+    str[1] = opcode;
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] != sender) {
+            send(clients[i].sock, &str, sizeof(str), 0);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void broadcast_file(int file_fd, off_t file_size, struct client_info* sender) {
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] != sender) {
+            sendfile(clients[i].sock, file_fd, 0, file_size);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+void send_file(char * message, struct client_info* sender) {
+    printf("MESSAGE %s\n", message);
+    char name[20] = "";
+    int i = 0;
+
+    while (message[i] != ' ' && message[i] != '\0') {
+        i++;
+    }
+    i++;
+    while (message[i] != ' ' && message[i] != '\0') {
+        i++;
+    }
+    i++;
+    int j = 0;
+    while (message[i] != ' ' && message[i] != '\0') {
+        name[j] = message[i];
+        i++;
+        j++;
+    }
+
+    printf("NAME %s\n", name);
+    broadcast_opcode(2, sender);
+
+    int file_fd = open(name, O_RDONLY);
+    if (file_fd == -1) {
+        perror("open");
+        return;
+    }
+
+    struct stat file_stat;
+    if (fstat(file_fd, &file_stat) < 0) {
+        perror("fstat");
+        close(file_fd);
+        return;
+    }
+
+    off_t file_size = file_stat.st_size;
+
+    broadcast_file(file_fd, file_size, sender);
+
+    close(file_fd);
+
+    /* send(sock, buffer, strlen(buffer), 0);
+    struct stat file_stat;
+    if (fstat(file_fd, &file_stat) < 0) {
+        perror("fstat");
+        close(file_fd);
+        continue;
+    }
+    char* filename = buffer + 10;
+    int file_fd = open(filename, O_RDONLY);
+    if (file_fd == -1) {
+        perror("open");
+        continue;
+    }
+
+    send(sock, buffer, strlen(buffer), 0);
+    struct stat file_stat;
+    if (fstat(file_fd, &file_stat) < 0) {
+        perror("fstat");
+        close(file_fd);
+        continue;
+    }
+
+    off_t file_size = file_stat.st_size;
+    send(sock, &file_size, sizeof(file_size), 0);
+
+    off_t offset = 0;
+    ssize_t sent_bytes = 0;
+    while (offset < file_size) {
+        sent_bytes = sendfile(sock, file_fd, &offset, file_size - offset);
+        if (sent_bytes <= 0) {
+            perror("sendfile");
+            break;
+        }
+    }
+
+    close(file_fd);
+    off_t file_size = file_stat.st_size;
+    send(sock, &file_size, sizeof(file_size), 0);
+
+    off_t offset = 0;
+    ssize_t sent_bytes = 0;
+    while (offset < file_size) {
+        sent_bytes = sendfile(sock, file_fd, &offset, file_size - offset);
+        if (sent_bytes <= 0) {
+            perror("sendfile");
+            break;
+        }
+    }
+
+    close(file_fd); */
+}
+
 void* handle_client(void* args) {
     struct client_info* client = (struct client_info*) args;
     char buffer[MAX_LINE];
@@ -184,9 +334,16 @@ void* handle_client(void* args) {
         char dest[MAX_USRLEN] = "";
         getDestUser(message, dest, MAX_USRLEN);
         if (strcmp(dest, "A") == 0) {
+            broadcast_opcode(1, client);
             removeDestUserFromMsg(message, newMessage);
             broadcast_message(newMessage, client);
+        } else if (strcmp(dest, "listUsers") == 0) {
+            printf("LIST USRES\n");
+            listConnectedUsers(client);
+        } else if (strcmp(dest, "sendfile") == 0) {
+            send_file(message, client);
         } else if (strcmp(dest, "") != 0) {
+            send_opcode_by_name(1, dest);
             removeDestUserFromMsg(message, newMessage);
             send_by_name(newMessage, dest);
         } else {
