@@ -173,31 +173,41 @@ void write_fd_to_file(int fd, const char* filename) {
     // Cerrar el archivo de salida
     close(output_fd);
 }
-
 void* receive_messages(void* args) {
     int sock = *(int*) args;
-    char buffer[MAX_LINE];
+    char buffer[BUFFER_SIZE];
     int bytes_received;
 
-    while ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) > 0) {
+    while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0) {
         if (buffer[1] == 1) {
-            // Handle message as before
+            // Manejar mensaje normal
         } else if (buffer[1] == 2) {  // File transfer opcode
-            int output_fd = open("test2.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            // Recibir tamaño del archivo
             off_t file_size;
-            recv(sock, &file_size, sizeof(file_size), 0); // Receive file size
+            bytes_received = recv(sock, &file_size, sizeof(file_size), 0);
+            if (bytes_received <= 0) {
+                // Manejar error
+                break;
+            }
 
-            int bytes_received = 0;
-            int total_expected = file_size;
-            while (bytes_received < total_expected) {
-                ssize_t bytes_read = recv(sock, buffer, BUFFER_SIZE, 0);
-                if (bytes_read <= 0) {
-                    // Handle error or connection termination
+            int output_fd = open("test2.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            if (output_fd < 0) {
+                perror("Error abriendo el archivo de salida");
+                exit(EXIT_FAILURE);
+            }
+
+            // Recibir y escribir el archivo
+            off_t received_size = 0;
+            while (received_size < file_size) {
+                bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+                if (bytes_received <= 0) {
+                    // Manejar error
                     break;
                 }
-                bytes_received += bytes_read;
-                write(output_fd, buffer, bytes_read);
+                write(output_fd, buffer, bytes_received);
+                received_size += bytes_received;
             }
+
             close(output_fd);
         }
         memset(buffer, 0, sizeof(buffer));
@@ -205,3 +215,4 @@ void* receive_messages(void* args) {
 
     return NULL;
 }
+
