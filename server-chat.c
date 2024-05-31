@@ -218,10 +218,10 @@ void broadcast_file(int file_fd, off_t file_size, struct client_info* sender) {
 }
 
 void send_file(char * message, struct client_info* sender) {
-    printf("MESSAGE %s\n", message);
-    char name[20] = "";
+    char filename[20] = "";
     int i = 0;
 
+    // Extraer el nombre del archivo del mensaje
     while (message[i] != ' ' && message[i] != '\0') {
         i++;
     }
@@ -232,84 +232,45 @@ void send_file(char * message, struct client_info* sender) {
     i++;
     int j = 0;
     while (message[i] != ' ' && message[i] != '\0') {
-        name[j] = message[i];
+        filename[j] = message[i];
         i++;
         j++;
     }
+    filename[j] = '\0';
 
-    printf("NAME %s\n", name);
-    broadcast_opcode(2, sender);
-
-    int file_fd = open(name, O_RDONLY);
-    if (file_fd == -1) {
-        perror("open");
-        return;
-    }
-
-    struct stat file_stat;
-    if (fstat(file_fd, &file_stat) < 0) {
-        perror("fstat");
-        close(file_fd);
-        return;
-    }
-
-    off_t file_size = file_stat.st_size;
-
-    broadcast_file(file_fd, file_size, sender);
-
-    close(file_fd);
-
-    /* send(sock, buffer, strlen(buffer), 0);
-    struct stat file_stat;
-    if (fstat(file_fd, &file_stat) < 0) {
-        perror("fstat");
-        close(file_fd);
-        continue;
-    }
-    char* filename = buffer + 10;
     int file_fd = open(filename, O_RDONLY);
     if (file_fd == -1) {
         perror("open");
-        continue;
+        return;
     }
 
-    send(sock, buffer, strlen(buffer), 0);
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0) {
         perror("fstat");
         close(file_fd);
-        continue;
+        return;
     }
 
     off_t file_size = file_stat.st_size;
-    send(sock, &file_size, sizeof(file_size), 0);
 
-    off_t offset = 0;
-    ssize_t sent_bytes = 0;
-    while (offset < file_size) {
-        sent_bytes = sendfile(sock, file_fd, &offset, file_size - offset);
-        if (sent_bytes <= 0) {
-            perror("sendfile");
-            break;
+    // Enviar opcode para inicio de transferencia de archivo
+    broadcast_opcode(2, sender);
+
+    // Enviar el tamaño del archivo a todos los clientes
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] != sender) {
+            send(clients[i].sock, &file_size, sizeof(file_size), 0);
         }
     }
+    pthread_mutex_unlock(&clients_mutex);
+
+    // Enviar el archivo a todos los clientes
+    broadcast_file(file_fd, file_size, sender);
 
     close(file_fd);
-    off_t file_size = file_stat.st_size;
-    send(sock, &file_size, sizeof(file_size), 0);
-
-    off_t offset = 0;
-    ssize_t sent_bytes = 0;
-    while (offset < file_size) {
-        sent_bytes = sendfile(sock, file_fd, &offset, file_size - offset);
-        if (sent_bytes <= 0) {
-            perror("sendfile");
-            break;
-        }
-    }
-
-    close(file_fd); */
 }
+
 
 void* handle_client(void* args) {
     struct client_info* client = (struct client_info*) args;

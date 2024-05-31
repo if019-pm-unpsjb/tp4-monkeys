@@ -173,31 +173,46 @@ void write_fd_to_file(int fd, const char* filename) {
     // Cerrar el archivo de salida
     close(output_fd);
 }
-
 void* receive_messages(void* args) {
     int sock = *(int*) args;
-    char buffer[MAX_LINE];
+    char buffer[BUFFER_SIZE];
     int bytes_received;
 
-    while ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) > 0) {
+    while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0) {
         if (buffer[1] == 1) {
-            printf("ESPERANDO MENSAJE\n");
-            if ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) < 0) {
+            // Manejar mensaje normal
+        } else if (buffer[1] == 2) {  // File transfer opcode
+            // Recibir tamaño del archivo
+            off_t file_size;
+            bytes_received = recv(sock, &file_size, sizeof(file_size), 0);
+            if (bytes_received <= 0) {
+                // Manejar error
                 break;
             }
-            buffer[bytes_received] = '\0';
-            printf("\r%s\nYou: ", buffer);
-            fflush(stdout);
-        } else {
-            printf("ESPERANDO ARCHIVO\n");
-            if ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) < 0) {
-                break;
+
+            int output_fd = open("test2.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            if (output_fd < 0) {
+                perror("Error abriendo el archivo de salida");
+                exit(EXIT_FAILURE);
             }
-            // Escribir el archivo
-            write_fd_to_file(sock, (char*) "test2.txt");
+
+            // Recibir y escribir el archivo
+            off_t received_size = 0;
+            while (received_size < file_size) {
+                bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+                if (bytes_received <= 0) {
+                    // Manejar error
+                    break;
+                }
+                write(output_fd, buffer, bytes_received);
+                received_size += bytes_received;
+            }
+
+            close(output_fd);
         }
         memset(buffer, 0, sizeof(buffer));
     }
 
     return NULL;
 }
+
