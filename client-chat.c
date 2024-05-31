@@ -181,20 +181,24 @@ void* receive_messages(void* args) {
 
     while ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) > 0) {
         if (buffer[1] == 1) {
-            printf("ESPERANDO MENSAJE\n");
-            if ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) < 0) {
-                break;
+            // Handle message as before
+        } else if (buffer[1] == 2) {  // File transfer opcode
+            int output_fd = open("test2.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            off_t file_size;
+            recv(sock, &file_size, sizeof(file_size), 0); // Receive file size
+
+            int bytes_received = 0;
+            int total_expected = file_size;
+            while (bytes_received < total_expected) {
+                ssize_t bytes_read = recv(sock, buffer, BUFFER_SIZE, 0);
+                if (bytes_read <= 0) {
+                    // Handle error or connection termination
+                    break;
+                }
+                bytes_received += bytes_read;
+                write(output_fd, buffer, bytes_read);
             }
-            buffer[bytes_received] = '\0';
-            printf("\r%s\nYou: ", buffer);
-            fflush(stdout);
-        } else {
-            printf("ESPERANDO ARCHIVO\n");
-            if ((bytes_received = recv(sock, buffer, MAX_LINE, 0)) < 0) {
-                break;
-            }
-            // Escribir el archivo
-            write_fd_to_file(sock, (char*) "test2.txt");
+            close(output_fd);
         }
         memset(buffer, 0, sizeof(buffer));
     }
