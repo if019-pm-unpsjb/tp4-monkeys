@@ -153,7 +153,7 @@ int main(int argc, char* argv[])
 
         if (opcode[1] == 1) {
             printf("READ REQ\n");
-            //strcpy(filepath, "files/");
+            strcpy(filepath, "files/");
             strcat(filepath, filename);
             file = fopen(filepath, "r");
             if (file == NULL) {
