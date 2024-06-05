@@ -173,17 +173,15 @@ void write_fd_to_file(int fd, const char* filename) {
     // Cerrar el archivo de salida
     close(output_fd);
 }
+
 void* receive_messages(void* args) {
     int sock = *(int*) args;
     char buffer[BUFFER_SIZE];
     int bytes_received;
 
     while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0) {
-        if (buffer[1] != 2) {
+        if (buffer[1] == 1) {
             // Manejar mensaje normal
-            buffer[bytes_received] = '\0';
-            printf("\r%s\nYou: ", buffer);
-            fflush(stdout);
         } else if (buffer[1] == 2) {  // File transfer opcode
             // Recibir tamaño del archivo
             off_t file_size;
@@ -193,7 +191,7 @@ void* receive_messages(void* args) {
                 break;
             }
 
-            int output_fd = open("test2.png", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            int output_fd = open("test2.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
             if (output_fd < 0) {
                 perror("Error abriendo el archivo de salida");
                 exit(EXIT_FAILURE);
@@ -218,4 +216,3 @@ void* receive_messages(void* args) {
 
     return NULL;
 }
-
