@@ -141,7 +141,7 @@ int main(int argc, char *argv[])
             break;
         }
         buffer[strcspn(buffer, "\n")] = '\0';
-        memset(dest, 0, sizeof(dest));
+        // memset(dest, 0, sizeof(dest));
         getDestUser(buffer, dest, MAX_USRLEN);
         // Se especificó el usuario
         if (strcmp(dest, "") != 0)
@@ -251,7 +251,7 @@ void *receive_messages(void *args)
             printf("\r%s\nYou: ", buffer);
             fflush(stdout);
         }
-        memset(buffer, 0, sizeof(buffer));
+        // memset(buffer, 0, sizeof(buffer));
     }
 
     return NULL;
