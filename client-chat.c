@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
     }
 
     // Send username to server
-    send(sock, username, strlen(username), 0);
+    send(sock, username, 20, 0);
 
     if (pthread_create(&thread, NULL, receive_messages, (void *)&sock) != 0)
     {
@@ -130,62 +130,55 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    memset(buffer, 0, sizeof(buffer));
     char defDest[MAX_USRLEN] = ":A ";
     char dest[MAX_USRLEN] = "";
-    while (1)
-    {
+    while (1) {
         printf("You: ");
         fflush(stdout);
-        if (fgets(buffer, MAX_LINE, stdin) == NULL)
-        {
+        if (fgets(buffer, MAX_LINE, stdin) == NULL) {
             break;
         }
         buffer[strcspn(buffer, "\n")] = '\0';
-        // memset(dest, 0, sizeof(dest));
+        memset(dest, 0, sizeof(dest));
         getDestUser(buffer, dest, MAX_USRLEN);
         // Se especificó el usuario
-        if (strcmp(dest, "") != 0)
-        {
+        if (strcmp(dest, "") != 0) {
             strcpy(defDest, dest);
             strcpy(message, buffer);
-        }
-        else
-        {
+        } else {
             addDestUser(defDest, buffer, message, MAX_LINE);
         }
-        if (send(sock, message, strlen(message), 0) == -1)
-        {
+        
+        if (send(sock, message, MAX_LINE, 0) == -1) {
             break;
         }
+        memset(message, 0, sizeof(message));
+        memset(buffer, 0, sizeof(buffer));
     }
 
     close(sock);
     return 0;
 }
 
-void write_fd_to_file(int fd, const char *filename)
-{
+void write_fd_to_file(int fd, const char *filename) {
     int output_fd;
     ssize_t bytes_read, bytes_written;
     char buffer[BUFFER_SIZE];
 
     // Abrir el archivo de salida para escritura
     output_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    if (output_fd < 0)
-    {
+    if (output_fd < 0) {
         perror("Error abriendo el archivo de salida");
         exit(EXIT_FAILURE);
     }
 
     // Leer del fd y escribir en el archivo de salida
-    while ((bytes_read = read(fd, buffer, BUFFER_SIZE)) > 0)
-    {
+    while ((bytes_read = read(fd, buffer, BUFFER_SIZE)) > 0) {
         ssize_t total_written = 0;
-        while (total_written < bytes_read)
-        {
+        while (total_written < bytes_read) {
             bytes_written = write(output_fd, buffer + total_written, bytes_read - total_written);
-            if (bytes_written < 0)
-            {
+            if (bytes_written < 0) {
                 perror("Error escribiendo en el archivo de salida");
                 close(output_fd);
                 exit(EXIT_FAILURE);
@@ -194,8 +187,7 @@ void write_fd_to_file(int fd, const char *filename)
         }
     }
 
-    if (bytes_read < 0)
-    {
+    if (bytes_read < 0) {
         perror("Error leyendo del file descriptor");
     }
 
@@ -203,39 +195,37 @@ void write_fd_to_file(int fd, const char *filename)
     close(output_fd);
 }
 
-void *receive_messages(void *args)
-{
+void *receive_messages(void *args) {
     int sock = *(int *)args;
     char buffer[BUFFER_SIZE];
     int bytes_received;
 
-    while ((bytes_received = recv(sock, buffer, BUFFER_SIZE, 0)) > 0)
-    {
-        if (buffer[1] == 2)
-        { // File transfer opcode
+    while ((bytes_received = recv(sock, buffer, 2, 0)) > 0) {
+        if (buffer[1] == 2) {
+
+            unsigned char ack[2];
+            ack[0] = 0;
+            ack[1] = 3;
+            send(sock, ack, sizeof(ack), 0);
             // Recibir tamaño del archivo
             off_t file_size;
             bytes_received = recv(sock, &file_size, sizeof(file_size), 0);
-            if (bytes_received <= 0)
-            {
+            if (bytes_received <= 0) {
                 // Manejar error
                 break;
             }
 
             int output_fd = open("test2.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-            if (output_fd < 0)
-            {
+            if (output_fd < 0) {
                 perror("Error abriendo el archivo de salida");
                 exit(EXIT_FAILURE);
             }
 
             // Recibir y escribir el archivo
             off_t received_size = 0;
-            while (received_size < file_size)
-            {
+            while (received_size < file_size) {
                 bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
-                if (bytes_received <= 0)
-                {
+                if (bytes_received <= 0) {
                     // Manejar error
                     break;
                 }
@@ -244,14 +234,20 @@ void *receive_messages(void *args)
             }
 
             close(output_fd);
-        }
-        else
-        {
+        } else if (buffer[1] == 1) {
+            printf("MANDO ACK\n");
+            // MANDAR ACK
+            unsigned char ack[2];
+            ack[0] = 0;
+            ack[1] = 3;
+            send(sock, ack, sizeof(ack), 0);
+
+            // RECIBIR MENSAJE
+            bytes_received = recv(sock, buffer, MAX_LINE, 0);
             buffer[bytes_received] = '\0';
             printf("\r%s\nYou: ", buffer);
             fflush(stdout);
         }
-        // memset(buffer, 0, sizeof(buffer));
     }
 
     return NULL;
