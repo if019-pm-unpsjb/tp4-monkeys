@@ -163,24 +163,31 @@ void removeDestUserFromMsg(char *str, char *newStr) {
 }
 
 void broadcast_message(char *message, struct client_info *sender) {
+    char formatted_message[MAX_LINE + MAX_USRLEN + 2]; // "+2" para el ": " y el null terminator
+    snprintf(formatted_message, sizeof(formatted_message), "%s: %s", sender->username, message);
+
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (&clients[i] != sender) {
-            send(clients[i].sock, message, strlen(message), 0);
+            send(clients[i].sock, formatted_message, strlen(formatted_message), 0);
         }
     }
     pthread_mutex_unlock(&clients_mutex);
 }
 
+
 void send_by_name(char *message, char *username) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < client_count; i++) {
         if (strcmp(clients[i].username, username) == 0) {
-            send(clients[i].sock, message, strlen(message), 0);
+            char formatted_message[MAX_LINE + MAX_USRLEN + 2];
+            snprintf(formatted_message, sizeof(formatted_message), "%s: %s", username, message);
+            send(clients[i].sock, formatted_message, strlen(formatted_message), 0);
         }
     }
     pthread_mutex_unlock(&clients_mutex);
 }
+
 
 void send_opcode_by_name(unsigned short opcode, char *username) {
     unsigned char str[2];

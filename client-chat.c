@@ -75,9 +75,9 @@ void addDestUser(const char *name, const char *message, char *destination, size_
 int main(int argc, char *argv[])
 {
     struct sockaddr_in server_addr;
-    char username[20];
+    char username[MAX_USRLEN];
     char buffer[MAX_LINE];
-    char message[MAX_LINE];
+    // char message[MAX_LINE];
     signal(SIGTERM, handler);
 
     if (argc != 3 && argc != 2)
@@ -131,8 +131,6 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    char defDest[MAX_USRLEN] = ":A ";
-    char dest[MAX_USRLEN] = "";
     while (1)
     {
         printf("You: ");
@@ -141,20 +139,8 @@ int main(int argc, char *argv[])
         {
             break;
         }
-        buffer[strcspn(buffer, "\n")] = '\0';
-        // memset(dest, 0, sizeof(dest));
-        getDestUser(buffer, dest, MAX_USRLEN);
-        // Se especificó el usuario
-        if (strcmp(dest, "") != 0)
-        {
-            strcpy(defDest, dest);
-            strcpy(message, buffer);
-        }
-        else
-        {
-            addDestUser(defDest, buffer, message, MAX_LINE);
-        }
-        if (send(sock, message, strlen(message), 0) == -1)
+        buffer[strcspn(buffer, "\n")] = '\0';  // Remove newline character
+        if (send(sock, buffer, strlen(buffer), 0) == -1)
         {
             break;
         }
@@ -163,7 +149,6 @@ int main(int argc, char *argv[])
     close(sock);
     return 0;
 }
-
 void write_fd_to_file(int fd, const char *filename)
 {
     int output_fd;
