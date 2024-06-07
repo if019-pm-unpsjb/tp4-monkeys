@@ -13,13 +13,17 @@
 #define MAX_LINE 100
 #define MAX_USRLEN 20
 #define DEFAULT_IP "127.0.0.1"
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 1024 
+#define COMMANDS_SIZE 2
+
+const char *COMMANDS[COMMANDS_SIZE] = {"listUsers", "sendfile"};
 
 void *receive_messages(void *args);
 
 void receive_file(int sock, const char *filename);
 
 int sock;
+pthread_mutex_t client_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_t thread;
 
 void handler(int signal)
@@ -27,6 +31,16 @@ void handler(int signal)
     close(sock);
     // pthread_exit(&thread);
     exit(EXIT_SUCCESS);
+}
+
+int isDestCommand(char * dest) {
+    for (int i = 0; i < COMMANDS_SIZE; i++)
+    {
+        if (strcmp(COMMANDS[i], dest) == 0) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 void getDestUser(const char *source, char *destination, size_t maxLen)
@@ -71,10 +85,10 @@ void addDestUser(const char *name, const char *message, char *destination, size_
     *destination = '\0';
 }
 
+char username[20];
 int main(int argc, char *argv[])
 {
     struct sockaddr_in server_addr;
-    char username[20];
     char buffer[MAX_LINE];
     char message[MAX_LINE];
     signal(SIGTERM, handler);
@@ -144,7 +158,9 @@ int main(int argc, char *argv[])
         getDestUser(buffer, dest, MAX_USRLEN);
         // Se especificó el usuario
         if (strcmp(dest, "") != 0) {
-            strcpy(defDest, dest);
+            if (isDestCommand(dest) != 0) {
+                strcpy(defDest, dest);
+            }
             strcpy(message, buffer);
         } else {
             addDestUser(defDest, buffer, message, MAX_LINE);
@@ -196,26 +212,30 @@ void write_fd_to_file(int fd, const char *filename) {
 }
 
 void *receive_messages(void *args) {
-    int sock = *(int *)args;
+    int socket = *(int *)args;
     char buffer[BUFFER_SIZE];
     int bytes_received;
 
-    while ((bytes_received = recv(sock, buffer, 2, 0)) > 0) {
+    while ((bytes_received = recv(socket, buffer, 2, 0)) > 0) {
         if (buffer[1] == 2) {
+            printf("ARCHIVO\n");
 
             unsigned char ack[2];
             ack[0] = 0;
             ack[1] = 3;
-            send(sock, ack, sizeof(ack), 0);
+            send(socket, ack, sizeof(ack), 0);
             // Recibir tamaño del archivo
             off_t file_size;
-            bytes_received = recv(sock, &file_size, sizeof(file_size), 0);
+            bytes_received = recv(socket, &file_size, sizeof(file_size), 0);
             if (bytes_received <= 0) {
                 // Manejar error
                 break;
             }
-
-            int output_fd = open("test2.txt", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            const char *suffix = "test.txt";
+            char destname[100] = "";
+            
+            snprintf(destname, sizeof(destname), "%s%s", (char*) username, suffix);
+            int output_fd = open(destname, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
             if (output_fd < 0) {
                 perror("Error abriendo el archivo de salida");
                 exit(EXIT_FAILURE);
@@ -224,7 +244,7 @@ void *receive_messages(void *args) {
             // Recibir y escribir el archivo
             off_t received_size = 0;
             while (received_size < file_size) {
-                bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+                bytes_received = recv(socket, buffer, BUFFER_SIZE, 0);
                 if (bytes_received <= 0) {
                     // Manejar error
                     break;
@@ -232,21 +252,22 @@ void *receive_messages(void *args) {
                 write(output_fd, buffer, bytes_received);
                 received_size += bytes_received;
             }
-
+            printf("Listo\n");
             close(output_fd);
         } else if (buffer[1] == 1) {
-            printf("MANDO ACK\n");
+            pthread_mutex_lock(&client_mutex);
             // MANDAR ACK
             unsigned char ack[2];
             ack[0] = 0;
             ack[1] = 3;
-            send(sock, ack, sizeof(ack), 0);
+            send(socket, ack, 2, 0);
 
             // RECIBIR MENSAJE
-            bytes_received = recv(sock, buffer, MAX_LINE, 0);
+            bytes_received = recv(socket, buffer, MAX_LINE, 0);
             buffer[bytes_received] = '\0';
             printf("\r%s\nYou: ", buffer);
             fflush(stdout);
+            pthread_mutex_unlock(&client_mutex);
         }
     }
 
