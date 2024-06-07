@@ -17,17 +17,17 @@
 
 void* handle_client(void* args);
 void send_by_name(char * message, char * username);
+void logout_by_name(char * username);
 
 struct client_info {
     struct sockaddr_in addr;
     socklen_t addr_len;
     int sock;
     char username[MAX_USRLEN];
-    int ack_pos;
+    int ack;
 };
 
 struct client_info clients[MAX_CLIENTS];
-int acks[MAX_CLIENTS];
 int client_count = 0;
 pthread_mutex_t client_mutex = PTHREAD_MUTEX_INITIALIZER;
 int server_sock, client_sock;
@@ -93,11 +93,10 @@ int main(int argc, char *argv[])
         else
         {
             struct client_info *new_client = &clients[client_count];
-            acks[client_count] = 0;
             new_client->sock = client_sock;
             new_client->addr = client_addr;
             new_client->addr_len = client_addr_len;
-            new_client->ack_pos = client_count;
+            new_client->ack = 0;
             pthread_t thread;
             if (pthread_create(&thread, NULL, handle_client, (void *)new_client) != 0)
             {
@@ -198,8 +197,14 @@ void send_by_name(char * message, char * username) {
     }
 }
 
+void wait_for_ack(struct client_info * client) {
+    while (client->ack == 0) {
+        // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
+    }
+    client->ack = 0;
+}
 
-void send_opcode_by_name(unsigned short opcode, char *username)
+void send_opcode_by_name(unsigned short opcode, char *username, int wait)
 {
     unsigned char str[2];
     str[0] = 0;
@@ -211,10 +216,9 @@ void send_opcode_by_name(unsigned short opcode, char *username)
         {
             send(clients[i].sock, str, sizeof(str), 0);
             printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
-            while (acks[clients[i].ack_pos] == 0) {
-                // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
+            if (wait == 1) {
+                wait_for_ack(&clients[i]);
             }
-            acks[clients[i].ack_pos] = 0;
             // recv(clients[i].sock, ack, sizeof(ack), 0);
             printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
         }
@@ -229,11 +233,7 @@ void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
         if (&clients[i] != sender) {
             printf("MANDO A %s\n", clients[i].username);
             send(clients[i].sock, str, sizeof(str), 0);
-            while (acks[clients[i].ack_pos] == 0)
-            {
-                // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
-            }
-            acks[clients[i].ack_pos] = 0;
+            wait_for_ack(&clients[i]);
         }
     }
 }
@@ -279,7 +279,7 @@ void send_file(char * message, struct client_info* sender) {
 
     printf("MANDAR ARCHIVO A %s\n", username);
 
-    send_opcode_by_name(2, username);
+    send_opcode_by_name(2, username, 1);
 
     int file_fd = open(filename, O_RDONLY);
     if (file_fd == -1) {
@@ -365,22 +365,19 @@ void *handle_client(void *args)
         {
 
             printf("%s QUIERE MANDAR A %s\n", client->username, dest);
-            send_opcode_by_name(1, dest);
+            send_opcode_by_name(1, dest, 1);
             removeDestUserFromMsg(message, newMessage);
             send_by_name(newMessage, dest);
         }
         else if (buffer[1] == 3)
         {
-            acks[client->ack_pos] = 1;
-            printf("ACK RECIBIDO\n");
-        } else {
-            printf("ERROR\n");
+            client->ack = 1;
         }
-        printf("SALI DE ACA\n");
     }
 
     // Remove client from list
-    pthread_mutex_lock(&client_mutex);
+    logout_by_name(client->username);
+/*     pthread_mutex_lock(&client_mutex);
     for (int i = 0; i < client_count; i++)
     {
         if (&clients[i] == client)
@@ -389,9 +386,36 @@ void *handle_client(void *args)
             break;
         }
     }
-    pthread_mutex_unlock(&client_mutex);
+    pthread_mutex_unlock(&client_mutex); */
 
     printf("%s disconnected\n", client->username);
     close(client->sock);
     return NULL;
+}
+
+void logout_by_name(char * username) {
+    pthread_mutex_lock(&client_mutex);
+    int index = -1;
+    // Buscar el usuario
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp((char *)&clients[i].username, username) == 0) {
+            index = i;
+            char message[MAX_LINE];
+            snprintf(message, sizeof(message), "%s %d disconnected", clients[i].username, i);
+            broadcast_opcode(1, &clients[i]);
+            broadcast_message(message, &clients[i]);
+            break;
+        }
+    }
+
+    if (index != -1) {
+        for (int i = index; i < client_count - 1; i++) {
+            clients[i] = clients[i + 1];
+        }
+        memset(&clients[client_count], 0, sizeof(struct client_info));
+        client_count--;
+    }
+
+    pthread_mutex_unlock(&client_mutex);
 }

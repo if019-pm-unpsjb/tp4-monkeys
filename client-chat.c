@@ -218,7 +218,7 @@ void *receive_messages(void *args) {
 
     while ((bytes_received = recv(socket, buffer, 2, 0)) > 0) {
         if (buffer[1] == 2) {
-            printf("ARCHIVO\n");
+            printf("Recibiendo archivo...\n");
 
             unsigned char ack[2];
             ack[0] = 0;
@@ -252,7 +252,7 @@ void *receive_messages(void *args) {
                 write(output_fd, buffer, bytes_received);
                 received_size += bytes_received;
             }
-            printf("Listo\n");
+            printf("Archivo recibido con éxito\n");
             close(output_fd);
         } else if (buffer[1] == 1) {
             pthread_mutex_lock(&client_mutex);
