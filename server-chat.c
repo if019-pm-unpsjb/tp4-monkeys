@@ -9,16 +9,17 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/sendfile.h>
-#include <sys/stat.h> 
+#include <sys/stat.h>
 
 #define MAX_LINE 100
 #define MAX_CLIENTS 10
 #define MAX_USRLEN 20
 
-void* handle_client(void* args);
-void send_by_name(char * message, char * username);
+void *handle_client(void *args);
+void send_by_name(char *message, char *username);
 
-struct client_info {
+struct client_info
+{
     struct sockaddr_in addr;
     socklen_t addr_len;
     int sock;
@@ -32,8 +33,10 @@ int client_count = 0;
 pthread_mutex_t client_mutex = PTHREAD_MUTEX_INITIALIZER;
 int server_sock, client_sock;
 
-void handler(int signal) {
-    for (int i = 0; i < client_count; i++) {
+void handler(int signal)
+{
+    for (int i = 0; i < client_count; i++)
+    {
         close(clients[i].sock);
     }
     close(server_sock);
@@ -47,7 +50,8 @@ int main(int argc, char *argv[])
     signal(SIGTERM, handler);
 
     server_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_sock == -1) {
+    if (server_sock == -1)
+    {
         perror("socket");
         exit(EXIT_FAILURE);
     }
@@ -57,12 +61,14 @@ int main(int argc, char *argv[])
     server_addr.sin_port = htons(8080);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(server_sock, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in)) == -1) {
+    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in)) == -1)
+    {
         perror("bind");
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_sock, 1) == -1) {
+    if (listen(server_sock, 1) == -1)
+    {
         perror("listen");
         exit(EXIT_FAILURE);
     }
@@ -87,7 +93,7 @@ int main(int argc, char *argv[])
         if (client_count >= MAX_CLIENTS)
         {
             printf("Max clients reached. Connection rejected: %s:%d\n",
-            inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
             close(client_sock);
         }
         else
@@ -117,42 +123,54 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-
-void listConnectedUsers(void* args) {
-    struct client_info* client = (struct client_info*) args;
+void listConnectedUsers(void *args)
+{
+    struct client_info *client = (struct client_info *)args;
 
     // Buffer para almacenar la lista de usuarios
     char clientList[2048];
     int offset = 0;
 
-    for (int i = 0; i < client_count; i++) {
-        if (strcmp(clients[i].username, client->username) != 0) {
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp(clients[i].username, client->username) != 0)
+        {
             // Añadir el nombre de usuario al buffer
             int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
             offset += len;
         }
     }
-    printf("CLIENTS %s\n", clientList);
+    printf("CLIENTS %s\n", clientList); // Mensaje de depuración
 
+    // send(client->sock, clientList, strlen(clientList), 0);
+    char header[2] = {0, 'U'}; // 'U' para indicar lista de usuarios
+    send(client->sock, header, sizeof(header), 0);
     send(client->sock, clientList, strlen(clientList), 0);
-
 }
-void getDestUser(const char* source, char* destination, size_t maxLen) {
+
+void getDestUser(const char *source, char *destination, size_t maxLen)
+{
     size_t i = 0;
     int j = 0;
-    while (source[j] != ' ') {
+    while (source[j] != ' ')
+    {
         j++;
     }
     j++;
 
-    if (source[j] == ':') {
+    if (source[j] == ':')
+    {
         j++;
-    } else {
+    }
+    else
+    {
         return;
     }
 
-    while(source[j] != '\0' && i < maxLen - 1) {
-        if (source[j] == ' ') {
+    while (source[j] != '\0' && i < maxLen - 1)
+    {
+        if (source[j] == ' ')
+        {
             break;
         }
         *destination++ = source[j];
@@ -161,43 +179,52 @@ void getDestUser(const char* source, char* destination, size_t maxLen) {
     *destination = '\0';
 }
 
-void removeDestUserFromMsg(char* str, char * newStr) {
+void removeDestUserFromMsg(char *str, char *newStr)
+{
     int j = 0;
     int i = 0;
-    while (str[j] != ' ') {
+    while (str[j] != ' ')
+    {
         newStr[i] = str[j];
         j++;
         i++;
     }
     j++;
 
-    while (str[j] != ' ') {
+    while (str[j] != ' ')
+    {
         j++;
     }
 
-    while (str[j] != '\0') {
+    while (str[j] != '\0')
+    {
         newStr[i] = str[j];
         i++;
         j++;
     }
 }
 
-void broadcast_message(char* message, struct client_info* sender) {
-    for (int i = 0; i < client_count; i++) {
-        if (&clients[i] != sender) {
+void broadcast_message(char *message, struct client_info *sender)
+{
+    for (int i = 0; i < client_count; i++)
+    {
+        if (&clients[i] != sender)
+        {
             send(clients[i].sock, message, strlen(message), 0);
         }
     }
 }
 
-void send_by_name(char * message, char * username) {
-    for (int i = 0; i < client_count; i++) {
-        if (strcmp((char * ) &clients[i].username,username) == 0) {
+void send_by_name(char *message, char *username)
+{
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp((char *)&clients[i].username, username) == 0)
+        {
             send(clients[i].sock, message, MAX_LINE, 0);
         }
     }
 }
-
 
 void send_opcode_by_name(unsigned short opcode, char *username)
 {
@@ -211,7 +238,8 @@ void send_opcode_by_name(unsigned short opcode, char *username)
         {
             send(clients[i].sock, str, sizeof(str), 0);
             printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
-            while (acks[clients[i].ack_pos] == 0) {
+            while (acks[clients[i].ack_pos] == 0)
+            {
                 // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
             }
             acks[clients[i].ack_pos] = 0;
@@ -221,12 +249,15 @@ void send_opcode_by_name(unsigned short opcode, char *username)
     }
 }
 
-void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
+void broadcast_opcode(unsigned short opcode, struct client_info *sender)
+{
     unsigned char str[2];
     str[0] = 0;
     str[1] = opcode;
-    for (int i = 0; i < client_count; i++) {
-        if (&clients[i] != sender) {
+    for (int i = 0; i < client_count; i++)
+    {
+        if (&clients[i] != sender)
+        {
             printf("MANDO A %s\n", clients[i].username);
             send(clients[i].sock, str, sizeof(str), 0);
             while (acks[clients[i].ack_pos] == 0)
@@ -238,29 +269,36 @@ void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
     }
 }
 
-void send_file_to_dest(int file_fd, off_t file_size, struct client_info* destino) {
-    for (int i = 0; i < client_count; i++) {
-        if (&clients[i] == destino) {
+void send_file_to_dest(int file_fd, off_t file_size, struct client_info *destino)
+{
+    for (int i = 0; i < client_count; i++)
+    {
+        if (&clients[i] == destino)
+        {
             sendfile(clients[i].sock, file_fd, 0, file_size);
         }
     }
 }
 
-void send_file(char * message, struct client_info* sender) {
+void send_file(char *message, struct client_info *sender)
+{
     char filename[20] = "";
     int i = 0;
 
     // Extraer el nombre del archivo del mensaje
-    while (message[i] != ' ' && message[i] != '\0') {
+    while (message[i] != ' ' && message[i] != '\0')
+    {
         i++;
     }
     i++;
-    while (message[i] != ' ' && message[i] != '\0') {
+    while (message[i] != ' ' && message[i] != '\0')
+    {
         i++;
     }
     i++;
     int j = 0;
-    while (message[i] != ' ' && message[i] != '\0') {
+    while (message[i] != ' ' && message[i] != '\0')
+    {
         filename[j] = message[i];
         i++;
         j++;
@@ -271,7 +309,8 @@ void send_file(char * message, struct client_info* sender) {
 
     char username[MAX_USRLEN] = "";
 
-    while (message[i] != ' ' && message[i] != '\0') {
+    while (message[i] != ' ' && message[i] != '\0')
+    {
         username[j] = message[i];
         i++;
         j++;
@@ -282,13 +321,15 @@ void send_file(char * message, struct client_info* sender) {
     send_opcode_by_name(2, username);
 
     int file_fd = open(filename, O_RDONLY);
-    if (file_fd == -1) {
+    if (file_fd == -1)
+    {
         perror("open");
         return;
     }
 
     struct stat file_stat;
-    if (fstat(file_fd, &file_stat) < 0) {
+    if (fstat(file_fd, &file_stat) < 0)
+    {
         perror("fstat");
         close(file_fd);
         return;
@@ -306,7 +347,6 @@ void send_file(char * message, struct client_info* sender) {
             destino = &clients[i];
         }
     }
-
 
     // Enviar el archivo a todos los clientes
     send_file_to_dest(file_fd, file_size, destino);
@@ -363,7 +403,6 @@ void *handle_client(void *args)
         }
         else if (strcmp(dest, "") != 0)
         {
-
             printf("%s QUIERE MANDAR A %s\n", client->username, dest);
             send_opcode_by_name(1, dest);
             removeDestUserFromMsg(message, newMessage);
@@ -373,7 +412,9 @@ void *handle_client(void *args)
         {
             acks[client->ack_pos] = 1;
             printf("ACK RECIBIDO\n");
-        } else {
+        }
+        else
+        {
             printf("ERROR\n");
         }
         printf("SALI DE ACA\n");

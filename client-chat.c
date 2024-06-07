@@ -86,31 +86,25 @@ void addDestUser(const char *name, const char *message, char *destination, size_
 }
 
 char username[20];
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     struct sockaddr_in server_addr;
     char buffer[MAX_LINE];
     char message[MAX_LINE];
     signal(SIGTERM, handler);
 
-    if (argc != 3 && argc != 2)
-    {
+    if (argc != 3 && argc != 2) {
         fprintf(stderr, "Usage: %s <server_ip> <username>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    if (argc == 3)
-    {
+    if (argc == 3) {
         strcpy(username, argv[2]);
-    }
-    else
-    {
+    } else {
         strcpy(username, argv[1]);
     }
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == -1)
-    {
+    if (sock == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
     }
@@ -118,17 +112,13 @@ int main(int argc, char *argv[])
     memset(&server_addr, 0, sizeof(struct sockaddr_in));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(8080);
-    if (argc == 3)
-    {
+    if (argc == 3) {
         inet_aton(argv[1], &server_addr.sin_addr);
-    }
-    else
-    {
+    } else {
         inet_aton(DEFAULT_IP, &server_addr.sin_addr);
     }
 
-    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
-    {
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
         perror("connect");
         close(sock);
         exit(EXIT_FAILURE);
@@ -137,8 +127,7 @@ int main(int argc, char *argv[])
     // Send username to server
     send(sock, username, 20, 0);
 
-    if (pthread_create(&thread, NULL, receive_messages, (void *)&sock) != 0)
-    {
+    if (pthread_create(&thread, NULL, receive_messages, (void *)&sock) != 0) {
         perror("pthread_create");
         close(sock);
         exit(EXIT_FAILURE);
@@ -268,6 +257,11 @@ void *receive_messages(void *args) {
             printf("\r%s\nYou: ", buffer);
             fflush(stdout);
             pthread_mutex_unlock(&client_mutex);
+        } else if (buffer[1] == 'U') { // Código para recibir lista de usuarios
+            bytes_received = recv(socket, buffer, BUFFER_SIZE, 0);
+            buffer[bytes_received] = '\0';
+            printf("Connected users:\n%s\nYou: ", buffer);
+            fflush(stdout);
         }
     }
 
