@@ -15,10 +15,6 @@
 #define MAX_CLIENTS 10
 #define MAX_USRLEN 20
 
-void *handle_client(void *args);
-void send_by_name(char *message, char *username);
-void logout_by_name(char * username);
-
 struct client_info
 {
     struct sockaddr_in addr;
@@ -27,6 +23,12 @@ struct client_info
     char username[MAX_USRLEN];
     int ack;
 };
+
+void *handle_client(void *args);
+void send_by_name(char *message, char *username);
+void logout_by_name(char * username);
+void logout_by_sock(int sock);
+int is_username_taken(struct client_info * client);
 
 struct client_info clients[MAX_CLIENTS];
 int client_count = 0;
@@ -80,15 +82,14 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        printf("Me llegó una conexión\n");
-
         pthread_mutex_lock(&client_mutex);
 
         if (client_count >= MAX_CLIENTS) {
             printf("Max clients reached. Connection rejected: %s:%d\n",
-                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
             close(client_sock);
         } else {
+            printf("%d\n", client_count);
             struct client_info *new_client = &clients[client_count];
             new_client->sock = client_sock;
             new_client->addr = client_addr;
@@ -97,7 +98,7 @@ int main(int argc, char *argv[]) {
             pthread_t thread;
             if (pthread_create(&thread, NULL, handle_client, (void *)new_client) != 0) {
                 perror("pthread_create");
-                close(client_sock); // Cerrar el socket si no se pudo crear el hilo
+                close(client_sock);
             } else {
                 pthread_detach(thread);
                 client_count++;
@@ -109,8 +110,14 @@ int main(int argc, char *argv[]) {
     close(server_sock);
     return 0;
 }
+
+void send_help(struct client_info * client) {
+    char * message = "Lista de comandos:\n:A <mensaje> -> Mandar un mensaje a todos los usuarios conectados.\n:<nombre_de_usuario> <mensaje> -> Mandar un mensaje a un usuario específico.\n:sendfile <nombre_archivo> <nombre_de_usuario> -> Mandar un archivo a un usuario específico.\n:listUsers -> Consultar los usuarios conectados en este momento.\n:help -> Muestra este mensaje.\nLos comandos 'A' y '<nombre_de_usuario>' quedan guardados para que no tengas que escribirlos en cada mensaje.";
+    send(client->sock, message, strlen(message), 0);
+}
+
 void listConnectedUsers(struct client_info *client) {
-    char clientList[2048] = "Connected users:\n";
+    char clientList[MAX_LINE] = "Connected users:\n";
     int offset = strlen(clientList);
 
     pthread_mutex_lock(&client_mutex);
@@ -210,22 +217,19 @@ void wait_for_ack(struct client_info * client) {
     client->ack = 0;
 }
 
-void send_opcode_by_name(unsigned short opcode, char *username)
+void send_opcode_by_name(unsigned short opcode, char *username, int wait)
 {
     unsigned char str[2];
     str[0] = 0;
     str[1] = opcode;
-    printf("%d count\n", client_count);
     for (int i = 0; i < client_count; i++)
     {
+        send(clients[i].sock, str, sizeof(str), 0);
         if (strcmp((char *)&clients[i].username, username) == 0)
         {
-            send(clients[i].sock, str, sizeof(str), 0);
-            printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
-            wait_for_ack(&clients[i]);
-            //acks[clients[i].ack_pos] = 0;
-            // recv(clients[i].sock, ack, sizeof(ack), 0);
-            printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
+            if (wait == 1) {
+                wait_for_ack(&clients[i]);
+            }
         }
     }
 }
@@ -239,13 +243,14 @@ void broadcast_opcode(unsigned short opcode, struct client_info *sender)
     {
         if (&clients[i] != sender)
         {
-            printf("MANDO A %s\n", clients[i].username);
             send(clients[i].sock, str, sizeof(str), 0);
-            while (clients[i].ack == 0)
+
+            wait_for_ack(&clients[i]);
+            /*while (clients[i].ack == 0)
             {
                 // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
             }
-            clients[i].ack = 0;
+            clients[i].ack = 0; */
         }
     }
 }
@@ -259,6 +264,20 @@ void send_file_to_dest(int file_fd, off_t file_size, struct client_info *destino
             sendfile(clients[i].sock, file_fd, 0, file_size);
         }
     }
+}
+
+struct client_info * get_destino(char * username) {
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp(clients[i].username, username) == 0) {
+            return &clients[i];
+        }
+    }
+    return NULL;
+}
+
+void send_error(struct client_info * sender, char * error_message) {
+    send_opcode_by_name(4, sender->username, 0);
+    send(sender->sock, error_message, strlen(error_message), 0);
 }
 
 void send_file(char *message, struct client_info *sender) {
@@ -294,17 +313,12 @@ void send_file(char *message, struct client_info *sender) {
 
     // Verificar si el usuario destino existe
     struct client_info *destino = NULL;
-    for (int i = 0; i < client_count; i++) {
-        if (strcmp(clients[i].username, username) == 0) {
-            destino = &clients[i];
-            break;
-        }
-    }
+    destino = get_destino(username);
 
     if (destino == NULL) {
         char error_message[MAX_LINE];
         snprintf(error_message, sizeof(error_message), "Error: User %s not connected.\n", username);
-        send(sender->sock, error_message, strlen(error_message), 0);
+        send_error(sender, error_message);
         return;
     }
 
@@ -312,12 +326,12 @@ void send_file(char *message, struct client_info *sender) {
     if (file_fd == -1) {
         char error_message[MAX_LINE];
         snprintf(error_message, sizeof(error_message), "Error: File %s not found.\n", filename);
-        send(sender->sock, error_message, strlen(error_message), 0);
+        send_error(sender, error_message);
         perror("open");
         return;
     }
 
-    send_opcode_by_name(2, username);
+    send_opcode_by_name(2, username, 1);
 
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0) {
@@ -330,6 +344,8 @@ void send_file(char *message, struct client_info *sender) {
 
     // Enviar el tamaño del archivo al cliente destino
     send(destino->sock, &file_size, sizeof(file_size), 0);
+    // Enviar el nombre del archivo
+    send(destino->sock, &filename, MAX_LINE, 0);
 
     // Enviar el archivo al cliente destino
     send_file_to_dest(file_fd, file_size, destino);
@@ -347,10 +363,18 @@ void *handle_client(void *args) {
     // Receive username
     bytes_received = recv(client->sock, client->username, 20, 0);
     if (bytes_received <= 0) {
-        close(client->sock);
-        return NULL;
+        logout_by_sock(client->sock);
     }
     client->username[bytes_received] = '\0';
+
+    /* if (is_username_taken(client) == 1)
+    {
+        pthread_mutex_unlock(&client_mutex);
+        char error_message[MAX_LINE] = "Error: Username already taken. Choose another one.\n";
+        send_opcode_by_name(5, client->username, 0);
+        send(client->sock, error_message, strlen(error_message), 0);
+    } */
+
 
     printf("New connection from %s:%d as %s\n", inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), client->username);
 
@@ -369,13 +393,24 @@ void *handle_client(void *args) {
             removeDestUserFromMsg(message, newMessage);
             broadcast_message(newMessage, client);
         } else if (strcmp(dest, "listUsers") == 0) {
+            send_opcode_by_name(4, client->username, 0);
             listConnectedUsers(client);
         } else if (strcmp(dest, "sendfile") == 0) {
             send_file(message, client);
+        } else if (strcmp(dest, "help") == 0) {
+            send_opcode_by_name(4, client->username, 0);
+            send_help(client);
         } else if (strcmp(dest, "") != 0) {
-            send_opcode_by_name(1, dest);
-            removeDestUserFromMsg(message, newMessage);
-            send_by_name(newMessage, dest);
+            struct client_info * tmp = get_destino(dest);
+            if (tmp != NULL) {
+                send_opcode_by_name(1, dest, 1);
+                removeDestUserFromMsg(message, newMessage);
+                send_by_name(newMessage, dest);
+            } else {
+                char tmpMsg[MAX_LINE]; 
+                snprintf(tmpMsg, sizeof(tmpMsg), "Error: user %s not connected\n", dest);
+                send_error(client, tmpMsg);
+            }
         } else if (buffer[1] == 3) {
             client->ack = 1;
         }
@@ -388,16 +423,15 @@ void *handle_client(void *args) {
     return NULL;
 }
 
-
-void logout_by_name(char * username) {
+void logout_by_sock(int sock) {
     pthread_mutex_lock(&client_mutex);
     int index = -1;
     // Buscar el usuario
     for (int i = 0; i < client_count; i++)
     {
-        if (strcmp((char *)&clients[i].username, username) == 0) {
+        if (clients[i].sock == sock) {
             index = i;
-            printf("%s %d disconnected\n", clients[i].username, i);
+            printf("Deslogueado\n");
             break;
         }
     }
@@ -411,4 +445,46 @@ void logout_by_name(char * username) {
     }
 
     pthread_mutex_unlock(&client_mutex);
+}
+
+void logout_by_name(char * username) {
+    pthread_mutex_lock(&client_mutex);
+    int index = -1;
+    // Buscar el usuario
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp((char *)&clients[i].username, username) == 0) {
+            index = i;
+            char message[MAX_LINE];
+            snprintf(message, sizeof(message), "%s %d disconnected", clients[i].username, i);
+            broadcast_opcode(1, &clients[i]);
+            broadcast_message(message, &clients[i]);
+            break;
+        }
+    }
+
+    if (index != -1) {
+        for (int i = index; i < client_count - 1; i++) {
+            clients[i] = clients[i + 1];
+        }
+        memset(&clients[client_count], 0, sizeof(struct client_info));
+        client_count--;
+    }
+
+    pthread_mutex_unlock(&client_mutex);
+}
+
+int is_username_taken(struct client_info * client)
+{
+    for (int i = 0; i < client_count; i++)
+    {
+        printf("USERLOOK %s SOCK %d\n", clients[i].username, clients[i].sock);
+        printf("USER %s SOCK %d\n", client->username, client->sock);
+        if (strcmp(clients[i].username, client->username) == 0 && clients[i].sock != client->sock)
+        {
+            printf("REPETIDO\n");
+            return 1; 
+        }
+    }
+    return 0; 
 }

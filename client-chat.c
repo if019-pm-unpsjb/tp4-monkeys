@@ -14,9 +14,9 @@
 #define MAX_USRLEN 20
 #define DEFAULT_IP "127.0.0.1"
 #define BUFFER_SIZE 1024
-#define COMMANDS_SIZE 2
+#define COMMANDS_SIZE 3
 
-const char *COMMANDS[COMMANDS_SIZE] = {"listUsers", "sendfile"};
+const char *COMMANDS[COMMANDS_SIZE] = {"listUsers", "sendfile", "help"};
 
 void *receive_messages(void *args);
 
@@ -173,6 +173,9 @@ int main(int argc, char *argv[])
         close(sock);
         exit(EXIT_FAILURE);
     }
+    
+    printf("Bienvenido al MonkeyChat!\n");
+    printf("Para empezar intentá escribir ':help' para ver la lista de comandos\n");
 
     memset(buffer, 0, sizeof(buffer));
     char defDest[MAX_USRLEN] = ":A ";
@@ -268,13 +271,12 @@ void *receive_messages(void *args)
     char buffer[BUFFER_SIZE];
     int bytes_received;
 
-    while ((bytes_received = recv(socket, buffer, BUFFER_SIZE - 1, 0)) > 0)
+    while ((bytes_received = recv(socket, buffer, 2, 0)) > 0)
     {
         buffer[bytes_received] = '\0'; // Asegurar que el buffer termine con un nulo
 
         if (buffer[1] == 2)
         {
-            printf("Recibiendo archivo...\n");
 
             unsigned char ack[2];
             ack[0] = 0;
@@ -288,11 +290,20 @@ void *receive_messages(void *args)
                 // Manejar error
                 break;
             }
-            const char *suffix = "test.txt";
-            char destname[100] = "";
+            char recv_filename[MAX_LINE];
+            char filename[MAX_LINE + strlen(username)];
+            // Recibir el nombre del archivo
+            bytes_received = recv(socket, &recv_filename, MAX_LINE, 0);
+            if (bytes_received <= 0)
+            {
+                // Manejar error
+                break;
+            }
 
-            snprintf(destname, sizeof(destname), "%s%s", (char *)username, suffix);
-            int output_fd = open(destname, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            printf("\rRecibiendo archivo %s...\n", filename);
+
+            snprintf(filename, sizeof(filename), "%s%s", (char *)username, (char *)recv_filename);
+            int output_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
             if (output_fd < 0)
             {
                 perror("Error abriendo el archivo de salida");
@@ -312,7 +323,7 @@ void *receive_messages(void *args)
                 write(output_fd, buffer, bytes_received);
                 received_size += bytes_received;
             }
-            printf("Archivo recibido con éxito\n");
+            printf("Archivo escrito con éxito en %s\nYou:", filename);
             close(output_fd);
         }
         else if (buffer[1] == 1)
@@ -331,11 +342,19 @@ void *receive_messages(void *args)
             fflush(stdout);
             pthread_mutex_unlock(&client_mutex);
         }
-        else
-        {
-            // Manejar mensajes de error u otros
+        else if (buffer[1] == 4) {
+            // Manejar mensajes de rollback 
+            bytes_received = recv(socket, buffer, MAX_LINE, 0);
+            buffer[bytes_received] = '\0';
             printf("\r%s\nYou: ", buffer);
             fflush(stdout);
+        } else if (buffer[1] == 5) {
+            bytes_received = recv(socket, buffer, MAX_LINE, 0);
+            buffer[bytes_received] = '\0';
+            printf("%s", buffer);
+            fflush(stdout);
+            close(sock);
+            exit(EXIT_SUCCESS);
         }
     }
 
