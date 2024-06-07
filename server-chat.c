@@ -17,15 +17,17 @@
 
 void* handle_client(void* args);
 void send_by_name(char * message, char * username);
-void logout_by_name(char * username);
+void logout_by_name(char *username);
 
-struct client_info {
+struct client_info
+{
     struct sockaddr_in addr;
     socklen_t addr_len;
     int sock;
     char username[MAX_USRLEN];
     int ack;
 };
+void send_error(struct client_info *sender, char *error_message);
 
 struct client_info clients[MAX_CLIENTS];
 int client_count = 0;
@@ -139,6 +141,7 @@ void listConnectedUsers(void* args) {
 
 }
 void getDestUser(const char* source, char* destination, size_t maxLen) {
+    printf("%s\n", source);
     size_t i = 0;
     int j = 0;
     while (source[j] != ' ') {
@@ -199,14 +202,21 @@ void send_by_name(char * message, char * username) {
     }
 }
 
-void wait_for_ack(struct client_info * client) {
+void wait_for_ack(struct client_info * sender, struct client_info * client) {
+    int retries = 0;
     while (client->ack == 0) {
+        sleep(1);
+        retries++;
+        if (retries == 5) {
+            send_error(sender, "Error: timedout");
+            break;
+        }
         // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
     }
     client->ack = 0;
 }
 
-void send_opcode_by_name(unsigned short opcode, char *username, int wait)
+void send_opcode_by_name(unsigned short opcode, char *username, int wait, struct client_info * sender)
 {
     unsigned char str[2];
     str[0] = 0;
@@ -219,7 +229,7 @@ void send_opcode_by_name(unsigned short opcode, char *username, int wait)
             send(clients[i].sock, str, sizeof(str), 0);
             printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
             if (wait == 1) {
-                wait_for_ack(&clients[i]);
+                wait_for_ack(sender, &clients[i]);
             }
             // recv(clients[i].sock, ack, sizeof(ack), 0);
             printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
@@ -234,14 +244,14 @@ void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
     for (int i = 0; i < client_count; i++) {
         if (&clients[i] != sender) {
             send(clients[i].sock, str, sizeof(str), 0);
-            wait_for_ack(&clients[i]);
+            wait_for_ack(sender, &clients[i]);
         }
     }
 }
 
 void send_error(struct client_info *sender, char *error_message)
 {
-    send_opcode_by_name(4, sender->username, 0);
+    send_opcode_by_name(4, sender->username, 0, sender);
     send(sender->sock, error_message, strlen(error_message), 0);
 }
 
@@ -314,7 +324,7 @@ void send_file(char * message, struct client_info* sender) {
         return;
     }
 
-    send_opcode_by_name(2, username, 1);
+    send_opcode_by_name(2, username, 1, sender);
     
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0) {
@@ -333,6 +343,18 @@ void send_file(char * message, struct client_info* sender) {
     send_file_to_dest(file_fd, file_size, destino);
 
     close(file_fd);
+}
+
+struct client_info *get_destino(char *username)
+{
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp(clients[i].username, username) == 0)
+        {
+            return &clients[i];
+        }
+    }
+    return NULL;
 }
 
 void *handle_client(void *args)
@@ -378,11 +400,19 @@ void *handle_client(void *args)
         }
         else if (strcmp(dest, "") != 0)
         {
-
-            printf("%s QUIERE MANDAR A %s\n", client->username, dest);
-            send_opcode_by_name(1, dest, 1);
-            removeDestUserFromMsg(message, newMessage);
-            send_by_name(newMessage, dest);
+            struct client_info *tmp = get_destino(dest);
+            if (tmp != NULL)
+            {
+                send_opcode_by_name(1, dest, 1, client);
+                removeDestUserFromMsg(message, newMessage);
+                send_by_name(newMessage, dest);
+            }
+            else
+            {
+                char tmpMsg[MAX_LINE];
+                snprintf(tmpMsg, sizeof(tmpMsg), "Error: user %s not connected\n", dest);
+                send_error(client, tmpMsg);
+            }
         }
         else if (buffer[1] == 3)
         {
