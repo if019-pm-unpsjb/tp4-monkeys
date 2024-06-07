@@ -260,7 +260,7 @@ void *receive_messages(void *args) {
         } else if (buffer[1] == 'U') { // Código para recibir lista de usuarios
             bytes_received = recv(socket, buffer, BUFFER_SIZE, 0);
             buffer[bytes_received] = '\0';
-            printf("Connected users:\n%s\nYou: ", buffer);
+            printf("\rConnected users:\n%s\nYou: ", buffer);
             fflush(stdout);
         }
     }

@@ -123,26 +123,20 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-void listConnectedUsers(void *args)
-{
-    struct client_info *client = (struct client_info *)args;
+void listConnectedUsers(void* args) {
+    struct client_info* client = (struct client_info*) args;
 
     // Buffer para almacenar la lista de usuarios
     char clientList[2048];
     int offset = 0;
 
-    for (int i = 0; i < client_count; i++)
-    {
-        if (strcmp(clients[i].username, client->username) != 0)
-        {
-            // Añadir el nombre de usuario al buffer
-            int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
-            offset += len;
-        }
+    for (int i = 0; i < client_count; i++) {
+        // Añadir el nombre de usuario al buffer, incluyendo el usuario solicitante
+        int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
+        offset += len;
     }
     printf("CLIENTS %s\n", clientList); // Mensaje de depuración
 
-    // send(client->sock, clientList, strlen(clientList), 0);
     char header[2] = {0, 'U'}; // 'U' para indicar lista de usuarios
     send(client->sock, header, sizeof(header), 0);
     send(client->sock, clientList, strlen(clientList), 0);
