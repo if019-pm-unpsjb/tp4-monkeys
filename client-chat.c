@@ -205,7 +205,9 @@ void *receive_messages(void *args) {
     char buffer[BUFFER_SIZE];
     int bytes_received;
 
-    while ((bytes_received = recv(socket, buffer, 2, 0)) > 0) {
+    while ((bytes_received = recv(socket, buffer, BUFFER_SIZE - 1, 0)) > 0) {
+        buffer[bytes_received] = '\0'; // Asegurar que el buffer termine con un nulo
+
         if (buffer[1] == 2) {
             printf("ARCHIVO\n");
 
@@ -222,7 +224,7 @@ void *receive_messages(void *args) {
             }
             const char *suffix = "test.txt";
             char destname[100] = "";
-            
+
             snprintf(destname, sizeof(destname), "%s%s", (char*) username, suffix);
             int output_fd = open(destname, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
             if (output_fd < 0) {
@@ -257,10 +259,9 @@ void *receive_messages(void *args) {
             printf("\r%s\nYou: ", buffer);
             fflush(stdout);
             pthread_mutex_unlock(&client_mutex);
-        } else if (buffer[1] == 'U') { // Código para recibir lista de usuarios
-            bytes_received = recv(socket, buffer, BUFFER_SIZE, 0);
-            buffer[bytes_received] = '\0';
-            printf("\rConnected users:\n%s\nYou: ", buffer);
+        } else {
+            // Manejar mensajes de error u otros
+            printf("\r%s\nYou: ", buffer);
             fflush(stdout);
         }
     }

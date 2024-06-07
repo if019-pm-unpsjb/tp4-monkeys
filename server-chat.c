@@ -43,15 +43,13 @@ void handler(int signal)
     exit(EXIT_SUCCESS);
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_addr_len = sizeof(struct sockaddr_in);
     signal(SIGTERM, handler);
 
     server_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_sock == -1)
-    {
+    if (server_sock == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
     }
@@ -61,14 +59,12 @@ int main(int argc, char *argv[])
     server_addr.sin_port = htons(8080);
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in)) == -1)
-    {
+    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in)) == -1) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_sock, 1) == -1)
-    {
+    if (listen(server_sock, 1) == -1) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
@@ -77,11 +73,9 @@ int main(int argc, char *argv[])
 
     memset(clients, 0, sizeof(clients));
 
-    while (1)
-    {
+    while (1) {
         client_sock = accept(server_sock, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client_sock == -1)
-        {
+        if (client_sock == -1) {
             perror("accept");
             continue;
         }
@@ -90,14 +84,11 @@ int main(int argc, char *argv[])
 
         pthread_mutex_lock(&client_mutex);
 
-        if (client_count >= MAX_CLIENTS)
-        {
+        if (client_count >= MAX_CLIENTS) {
             printf("Max clients reached. Connection rejected: %s:%d\n",
                    inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
             close(client_sock);
-        }
-        else
-        {
+        } else {
             struct client_info *new_client = &clients[client_count];
             acks[client_count] = 0;
             new_client->sock = client_sock;
@@ -105,13 +96,10 @@ int main(int argc, char *argv[])
             new_client->addr_len = client_addr_len;
             new_client->ack_pos = client_count;
             pthread_t thread;
-            if (pthread_create(&thread, NULL, handle_client, (void *)new_client) != 0)
-            {
+            if (pthread_create(&thread, NULL, handle_client, (void *)new_client) != 0) {
                 perror("pthread_create");
                 close(client_sock); // Cerrar el socket si no se pudo crear el hilo
-            }
-            else
-            {
+            } else {
                 pthread_detach(thread);
                 client_count++;
             }
@@ -122,23 +110,19 @@ int main(int argc, char *argv[])
     close(server_sock);
     return 0;
 }
+void listConnectedUsers(struct client_info *client) {
+    char clientList[2048] = "Connected users:\n";
+    int offset = strlen(clientList);
 
-void listConnectedUsers(void* args) {
-    struct client_info* client = (struct client_info*) args;
-
-    // Buffer para almacenar la lista de usuarios
-    char clientList[2048];
-    int offset = 0;
+    pthread_mutex_lock(&client_mutex);
 
     for (int i = 0; i < client_count; i++) {
-        // Añadir el nombre de usuario al buffer, incluyendo el usuario solicitante
         int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
         offset += len;
     }
-    printf("CLIENTS %s\n", clientList); // Mensaje de depuración
 
-    char header[2] = {0, 'U'}; // 'U' para indicar lista de usuarios
-    send(client->sock, header, sizeof(header), 0);
+    pthread_mutex_unlock(&client_mutex);
+
     send(client->sock, clientList, strlen(clientList), 0);
 }
 
@@ -274,25 +258,21 @@ void send_file_to_dest(int file_fd, off_t file_size, struct client_info *destino
     }
 }
 
-void send_file(char *message, struct client_info *sender)
-{
+void send_file(char *message, struct client_info *sender) {
     char filename[20] = "";
     int i = 0;
 
     // Extraer el nombre del archivo del mensaje
-    while (message[i] != ' ' && message[i] != '\0')
-    {
+    while (message[i] != ' ' && message[i] != '\0') {
         i++;
     }
     i++;
-    while (message[i] != ' ' && message[i] != '\0')
-    {
+    while (message[i] != ' ' && message[i] != '\0') {
         i++;
     }
     i++;
     int j = 0;
-    while (message[i] != ' ' && message[i] != '\0')
-    {
+    while (message[i] != ' ' && message[i] != '\0') {
         filename[j] = message[i];
         i++;
         j++;
@@ -303,8 +283,7 @@ void send_file(char *message, struct client_info *sender)
 
     char username[MAX_USRLEN] = "";
 
-    while (message[i] != ' ' && message[i] != '\0')
-    {
+    while (message[i] != ' ' && message[i] != '\0') {
         username[j] = message[i];
         i++;
         j++;
@@ -312,18 +291,36 @@ void send_file(char *message, struct client_info *sender)
 
     printf("MANDAR ARCHIVO A %s\n", username);
 
-    send_opcode_by_name(2, username);
+    // Verificar si el usuario destino existe
+    struct client_info *destino = NULL;
+    for (int i = 0; i < client_count; i++) {
+        if (strcmp(clients[i].username, username) == 0) {
+            destino = &clients[i];
+            break;
+        }
+    }
 
+    if (destino == NULL) {
+        char error_message[MAX_LINE];
+        snprintf(error_message, sizeof(error_message), "Error: User %s not connected.\n", username);
+        send(sender->sock, error_message, strlen(error_message), 0);
+        return;
+    }
+
+    // Verificar si el archivo existe
     int file_fd = open(filename, O_RDONLY);
-    if (file_fd == -1)
-    {
+    if (file_fd == -1) {
+        char error_message[MAX_LINE];
+        snprintf(error_message, sizeof(error_message), "Error: File %s not found.\n", filename);
+        send(sender->sock, error_message, strlen(error_message), 0);
         perror("open");
         return;
     }
 
+    send_opcode_by_name(2, username);
+
     struct stat file_stat;
-    if (fstat(file_fd, &file_stat) < 0)
-    {
+    if (fstat(file_fd, &file_stat) < 0) {
         perror("fstat");
         close(file_fd);
         return;
@@ -331,33 +328,25 @@ void send_file(char *message, struct client_info *sender)
 
     off_t file_size = file_stat.st_size;
 
-    struct client_info *destino;
-    // Enviar el tamaño del archivo al cliente
-    for (int i = 0; i < client_count; i++)
-    {
-        if (strcmp((char *)&clients[i].username, username) == 0)
-        {
-            send(clients[i].sock, &file_size, sizeof(file_size), 0);
-            destino = &clients[i];
-        }
-    }
+    // Enviar el tamaño del archivo al cliente destino
+    send(destino->sock, &file_size, sizeof(file_size), 0);
 
-    // Enviar el archivo a todos los clientes
+    // Enviar el archivo al cliente destino
     send_file_to_dest(file_fd, file_size, destino);
 
     close(file_fd);
 }
 
-void *handle_client(void *args)
-{
+
+
+void *handle_client(void *args) {
     struct client_info *client = (struct client_info *)args;
     char buffer[MAX_LINE];
     int bytes_received;
 
     // Receive username
     bytes_received = recv(client->sock, client->username, 20, 0);
-    if (bytes_received <= 0)
-    {
+    if (bytes_received <= 0) {
         close(client->sock);
         return NULL;
     }
@@ -367,8 +356,7 @@ void *handle_client(void *args)
 
     printf("New connection from %s:%d as %s\n", inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), client->username);
 
-    while ((bytes_received = recv(client->sock, buffer, MAX_LINE, 0)) > 0)
-    {
+    while ((bytes_received = recv(client->sock, buffer, MAX_LINE, 0)) > 0) {
         printf("RECIBI %d BYTES\n", bytes_received);
         printf("DE %s\n", client->username);
         buffer[bytes_received] = '\0';
@@ -380,35 +368,24 @@ void *handle_client(void *args)
         char dest[MAX_USRLEN] = "";
         getDestUser(message, dest, MAX_USRLEN);
 
-        if (strcmp(dest, "A") == 0)
-        {
+        if (strcmp(dest, "A") == 0) {
             broadcast_opcode(1, client);
             removeDestUserFromMsg(message, newMessage);
             broadcast_message(newMessage, client);
-        }
-        else if (strcmp(dest, "listUsers") == 0)
-        {
+        } else if (strcmp(dest, "listUsers") == 0) {
             printf("LIST USERS\n");
             listConnectedUsers(client);
-        }
-        else if (strcmp(dest, "sendfile") == 0)
-        {
+        } else if (strcmp(dest, "sendfile") == 0) {
             send_file(message, client);
-        }
-        else if (strcmp(dest, "") != 0)
-        {
+        } else if (strcmp(dest, "") != 0) {
             printf("%s QUIERE MANDAR A %s\n", client->username, dest);
             send_opcode_by_name(1, dest);
             removeDestUserFromMsg(message, newMessage);
             send_by_name(newMessage, dest);
-        }
-        else if (buffer[1] == 3)
-        {
+        } else if (buffer[1] == 3) {
             acks[client->ack_pos] = 1;
             printf("ACK RECIBIDO\n");
-        }
-        else
-        {
+        } else {
             printf("ERROR\n");
         }
         printf("SALI DE ACA\n");
@@ -416,10 +393,8 @@ void *handle_client(void *args)
 
     // Remove client from list
     pthread_mutex_lock(&client_mutex);
-    for (int i = 0; i < client_count; i++)
-    {
-        if (&clients[i] == client)
-        {
+    for (int i = 0; i < client_count; i++) {
+        if (&clients[i] == client) {
             clients[i] = clients[--client_count];
             break;
         }
