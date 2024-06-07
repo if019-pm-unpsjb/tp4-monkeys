@@ -307,7 +307,6 @@ void send_file(char *message, struct client_info *sender) {
         return;
     }
 
-    // Verificar si el archivo existe
     int file_fd = open(filename, O_RDONLY);
     if (file_fd == -1) {
         char error_message[MAX_LINE];
