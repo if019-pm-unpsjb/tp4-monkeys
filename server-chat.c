@@ -23,13 +23,14 @@ struct client_info {
     socklen_t addr_len;
     int sock;
     char username[MAX_USRLEN];
+    int ack_pos;
 };
 
 struct client_info clients[MAX_CLIENTS];
+int acks[MAX_CLIENTS];
 int client_count = 0;
 pthread_mutex_t client_mutex = PTHREAD_MUTEX_INITIALIZER;
 int server_sock, client_sock;
-pthread_t threads[MAX_CLIENTS];
 
 void handler(int signal) {
     for (int i = 0; i < client_count; i++) {
@@ -61,12 +62,14 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_sock, MAX_CLIENTS) == -1) {
+    if (listen(server_sock, 1) == -1) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
 
     printf("Server listening on port 8080\n");
+
+    memset(clients, 0, sizeof(clients));
 
     while (1)
     {
@@ -84,28 +87,29 @@ int main(int argc, char *argv[])
         if (client_count >= MAX_CLIENTS)
         {
             printf("Max clients reached. Connection rejected: %s:%d\n",
-                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
             close(client_sock);
         }
         else
         {
             struct client_info *new_client = &clients[client_count];
+            acks[client_count] = 0;
             new_client->sock = client_sock;
             new_client->addr = client_addr;
             new_client->addr_len = client_addr_len;
-
-            if (pthread_create(&threads[client_count], NULL, handle_client, (void *)new_client) != 0)
+            new_client->ack_pos = client_count;
+            pthread_t thread;
+            if (pthread_create(&thread, NULL, handle_client, (void *)new_client) != 0)
             {
                 perror("pthread_create");
                 close(client_sock); // Cerrar el socket si no se pudo crear el hilo
             }
             else
             {
-                pthread_detach(threads[client_count]);
+                pthread_detach(thread);
                 client_count++;
             }
         }
-
         pthread_mutex_unlock(&client_mutex);
     }
 
@@ -129,6 +133,7 @@ void listConnectedUsers(void* args) {
         }
     }
     printf("CLIENTS %s\n", clientList);
+
     send(client->sock, clientList, strlen(clientList), 0);
 
 }
@@ -197,7 +202,6 @@ void send_by_name(char * message, char * username) {
 void send_opcode_by_name(unsigned short opcode, char *username)
 {
     unsigned char str[2];
-    unsigned char ack[2];
     str[0] = 0;
     str[1] = opcode;
     printf("%d count\n", client_count);
@@ -207,7 +211,11 @@ void send_opcode_by_name(unsigned short opcode, char *username)
         {
             send(clients[i].sock, str, sizeof(str), 0);
             printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
-            recv(clients[i].sock, ack, sizeof(ack), 0);
+            while (acks[clients[i].ack_pos] == 0) {
+                // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
+            }
+            acks[clients[i].ack_pos] = 0;
+            // recv(clients[i].sock, ack, sizeof(ack), 0);
             printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
         }
     }
@@ -217,20 +225,22 @@ void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
     unsigned char str[2];
     str[0] = 0;
     str[1] = opcode;
-    unsigned char ack[2];
     for (int i = 0; i < client_count; i++) {
         if (&clients[i] != sender) {
             printf("MANDO A %s\n", clients[i].username);
             send(clients[i].sock, str, sizeof(str), 0);
-            recv(clients[i].sock, ack, sizeof(ack), 0);
-            printf("ME LLEGO ACK %d\n", ack[1]);
+            while (acks[clients[i].ack_pos] == 0)
+            {
+                // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
+            }
+            acks[clients[i].ack_pos] = 0;
         }
     }
 }
 
-void broadcast_file(int file_fd, off_t file_size, struct client_info* sender) {
+void send_file_to_dest(int file_fd, off_t file_size, struct client_info* destino) {
     for (int i = 0; i < client_count; i++) {
-        if (&clients[i] != sender) {
+        if (&clients[i] == destino) {
             sendfile(clients[i].sock, file_fd, 0, file_size);
         }
     }
@@ -256,6 +266,20 @@ void send_file(char * message, struct client_info* sender) {
         j++;
     }
     filename[j] = '\0';
+    i++;
+    j = 0;
+
+    char username[MAX_USRLEN] = "";
+
+    while (message[i] != ' ' && message[i] != '\0') {
+        username[j] = message[i];
+        i++;
+        j++;
+    }
+
+    printf("MANDAR ARCHIVO A %s\n", username);
+
+    send_opcode_by_name(2, username);
 
     int file_fd = open(filename, O_RDONLY);
     if (file_fd == -1) {
@@ -272,18 +296,20 @@ void send_file(char * message, struct client_info* sender) {
 
     off_t file_size = file_stat.st_size;
 
-    // Enviar opcode para inicio de transferencia de archivo
-    broadcast_opcode(2, sender);
-
-    // Enviar el tamaño del archivo a todos los clientes
-    for (int i = 0; i < client_count; i++) {
-        if (&clients[i] != sender) {
+    struct client_info *destino;
+    // Enviar el tamaño del archivo al cliente
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp((char *)&clients[i].username, username) == 0)
+        {
             send(clients[i].sock, &file_size, sizeof(file_size), 0);
+            destino = &clients[i];
         }
     }
 
+
     // Enviar el archivo a todos los clientes
-    broadcast_file(file_fd, file_size, sender);
+    send_file_to_dest(file_fd, file_size, destino);
 
     close(file_fd);
 }
@@ -337,14 +363,18 @@ void *handle_client(void *args)
         }
         else if (strcmp(dest, "") != 0)
         {
+
             printf("%s QUIERE MANDAR A %s\n", client->username, dest);
             send_opcode_by_name(1, dest);
             removeDestUserFromMsg(message, newMessage);
             send_by_name(newMessage, dest);
         }
-        else
+        else if (buffer[1] == 3)
         {
-            printf("ERROR NO HAY DESTINATARIO\n");
+            acks[client->ack_pos] = 1;
+            printf("ACK RECIBIDO\n");
+        } else {
+            printf("ERROR\n");
         }
         printf("SALI DE ACA\n");
     }
