@@ -17,6 +17,7 @@
 
 void *handle_client(void *args);
 void send_by_name(char *message, char *username);
+void logout_by_name(char * username);
 
 struct client_info
 {
@@ -24,11 +25,10 @@ struct client_info
     socklen_t addr_len;
     int sock;
     char username[MAX_USRLEN];
-    int ack_pos;
+    int ack;
 };
 
 struct client_info clients[MAX_CLIENTS];
-int acks[MAX_CLIENTS];
 int client_count = 0;
 pthread_mutex_t client_mutex = PTHREAD_MUTEX_INITIALIZER;
 int server_sock, client_sock;
@@ -90,11 +90,10 @@ int main(int argc, char *argv[]) {
             close(client_sock);
         } else {
             struct client_info *new_client = &clients[client_count];
-            acks[client_count] = 0;
             new_client->sock = client_sock;
             new_client->addr = client_addr;
             new_client->addr_len = client_addr_len;
-            new_client->ack_pos = client_count;
+            new_client->ack = 0;
             pthread_t thread;
             if (pthread_create(&thread, NULL, handle_client, (void *)new_client) != 0) {
                 perror("pthread_create");
@@ -216,11 +215,12 @@ void send_opcode_by_name(unsigned short opcode, char *username)
         {
             send(clients[i].sock, str, sizeof(str), 0);
             printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
-            while (acks[clients[i].ack_pos] == 0)
+            while (clients[i].ack == 0)
             {
                 // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
             }
-            acks[clients[i].ack_pos] = 0;
+            clients[i].ack = 0;
+            //acks[clients[i].ack_pos] = 0;
             // recv(clients[i].sock, ack, sizeof(ack), 0);
             printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
         }
@@ -238,11 +238,11 @@ void broadcast_opcode(unsigned short opcode, struct client_info *sender)
         {
             printf("MANDO A %s\n", clients[i].username);
             send(clients[i].sock, str, sizeof(str), 0);
-            while (acks[clients[i].ack_pos] == 0)
+            while (clients[i].ack == 0)
             {
                 // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
             }
-            acks[clients[i].ack_pos] = 0;
+            clients[i].ack = 0;
         }
     }
 }
@@ -382,7 +382,8 @@ void *handle_client(void *args) {
             removeDestUserFromMsg(message, newMessage);
             send_by_name(newMessage, dest);
         } else if (buffer[1] == 3) {
-            acks[client->ack_pos] = 1;
+            client->ack = 1;
+            //acks[client->ack_pos] = 1;
             printf("ACK RECIBIDO\n");
         } else {
             printf("ERROR\n");
@@ -391,16 +392,34 @@ void *handle_client(void *args) {
     }
 
     // Remove client from list
+
+    logout_by_name(client->username);
+
+    close(client->sock);
+    return NULL;
+}
+
+
+void logout_by_name(char * username) {
+    printf("%s SE QUIERE DESCONECTAR", username);
     pthread_mutex_lock(&client_mutex);
-    for (int i = 0; i < client_count; i++) {
-        if (&clients[i] == client) {
-            clients[i] = clients[--client_count];
+    int index = -1;
+    // Buscar el usuario
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp((char *)&clients[i].username, username) == 0) {
+            index = i;
+            printf("%s %d disconnected\n", clients[i].username, i);
             break;
         }
     }
-    pthread_mutex_unlock(&client_mutex);
 
-    printf("%s disconnected\n", client->username);
-    close(client->sock);
-    return NULL;
+    if (index != -1) {
+        for (int i = index; i < client_count - 1; i++) {
+            clients[i] = clients[i + 1];
+        }
+        client_count--;
+    }
+
+    pthread_mutex_unlock(&client_mutex);
 }
