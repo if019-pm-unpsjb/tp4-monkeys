@@ -14,9 +14,9 @@
 #define MAX_USRLEN 20
 #define DEFAULT_IP "127.0.0.1"
 #define BUFFER_SIZE 1024 
-#define COMMANDS_SIZE 2
+#define COMMANDS_SIZE 1
 
-const char *COMMANDS[COMMANDS_SIZE] = {"listUsers", "sendfile"};
+const char *COMMANDS[COMMANDS_SIZE] = {"sendfile"};
 
 void *receive_messages(void *args);
 
@@ -218,8 +218,6 @@ void *receive_messages(void *args) {
 
     while ((bytes_received = recv(socket, buffer, 2, 0)) > 0) {
         if (buffer[1] == 2) {
-            printf("Recibiendo archivo...\n");
-
             unsigned char ack[2];
             ack[0] = 0;
             ack[1] = 3;
@@ -227,32 +225,45 @@ void *receive_messages(void *args) {
             // Recibir tamaño del archivo
             off_t file_size;
             bytes_received = recv(socket, &file_size, sizeof(file_size), 0);
-            if (bytes_received <= 0) {
+            if (bytes_received <= 0)
+            {
                 // Manejar error
                 break;
             }
-            const char *suffix = "test.txt";
-            char destname[100] = "";
-            
-            snprintf(destname, sizeof(destname), "%s%s", (char*) username, suffix);
-            int output_fd = open(destname, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-            if (output_fd < 0) {
+            char recv_filename[MAX_LINE];
+            char filename[MAX_LINE + strlen(username)];
+            // Recibir el nombre del archivo
+            bytes_received = recv(socket, &recv_filename, MAX_LINE, 0);
+            if (bytes_received <= 0)
+            {
+                // Manejar error
+                break;
+            }
+
+            printf("\rRecibiendo archivo %s...\n", filename);
+
+            snprintf(filename, sizeof(filename), "%s%s", (char *)username, (char *)recv_filename);
+            int output_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            if (output_fd < 0)
+            {
                 perror("Error abriendo el archivo de salida");
                 exit(EXIT_FAILURE);
             }
 
             // Recibir y escribir el archivo
             off_t received_size = 0;
-            while (received_size < file_size) {
+            while (received_size < file_size)
+            {
                 bytes_received = recv(socket, buffer, BUFFER_SIZE, 0);
-                if (bytes_received <= 0) {
+                if (bytes_received <= 0)
+                {
                     // Manejar error
                     break;
                 }
                 write(output_fd, buffer, bytes_received);
                 received_size += bytes_received;
             }
-            printf("Archivo recibido con éxito\n");
+            printf("Archivo escrito con éxito en %s\nYou:", filename);
             close(output_fd);
         } else if (buffer[1] == 1) {
             pthread_mutex_lock(&client_mutex);
@@ -262,6 +273,14 @@ void *receive_messages(void *args) {
             ack[1] = 3;
             send(socket, ack, 2, 0);
 
+            // RECIBIR MENSAJE
+            bytes_received = recv(socket, buffer, MAX_LINE, 0);
+            buffer[bytes_received] = '\0';
+            printf("\r%s\nYou: ", buffer);
+            fflush(stdout);
+            pthread_mutex_unlock(&client_mutex);
+        } else if (buffer[1] == 4) {
+            pthread_mutex_lock(&client_mutex);
             // RECIBIR MENSAJE
             bytes_received = recv(socket, buffer, MAX_LINE, 0);
             buffer[bytes_received] = '\0';

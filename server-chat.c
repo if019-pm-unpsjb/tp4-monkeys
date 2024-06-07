@@ -55,9 +55,11 @@ int main(int argc, char *argv[])
     memset(&server_addr, 0, sizeof(struct sockaddr_in));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(8080);
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    //server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    inet_aton("192.168.25.111", &(server_addr.sin_addr));
 
-    if (bind(server_sock, (struct sockaddr*) &server_addr, sizeof(struct sockaddr_in)) == -1) {
+    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in)) == -1)
+    {
         perror("bind");
         exit(EXIT_FAILURE);
     }
@@ -231,11 +233,16 @@ void broadcast_opcode(unsigned short opcode, struct client_info* sender) {
     str[1] = opcode;
     for (int i = 0; i < client_count; i++) {
         if (&clients[i] != sender) {
-            printf("MANDO A %s\n", clients[i].username);
             send(clients[i].sock, str, sizeof(str), 0);
             wait_for_ack(&clients[i]);
         }
     }
+}
+
+void send_error(struct client_info *sender, char *error_message)
+{
+    send_opcode_by_name(4, sender->username, 0);
+    send(sender->sock, error_message, strlen(error_message), 0);
 }
 
 void send_file_to_dest(int file_fd, off_t file_size, struct client_info* destino) {
@@ -279,14 +286,36 @@ void send_file(char * message, struct client_info* sender) {
 
     printf("MANDAR ARCHIVO A %s\n", username);
 
-    send_opcode_by_name(2, username, 1);
+    struct client_info *destino;
+    // Enviar el tamaño del archivo al cliente
+    for (int i = 0; i < client_count; i++)
+    {
+        if (strcmp((char *)&clients[i].username, username) == 0)
+        {
+            destino = &clients[i];
+        }
+    }
+
+    if (destino == NULL)
+    {
+        char error_message[MAX_LINE];
+        snprintf(error_message, sizeof(error_message), "Error: User %s not connected.\n", username);
+        send_error(sender, error_message);
+        return;
+    }
 
     int file_fd = open(filename, O_RDONLY);
-    if (file_fd == -1) {
+    if (file_fd == -1)
+    {
+        char error_message[MAX_LINE];
+        snprintf(error_message, sizeof(error_message), "Error: File %s not found.\n", filename);
+        send_error(sender, error_message);
         perror("open");
         return;
     }
 
+    send_opcode_by_name(2, username, 1);
+    
     struct stat file_stat;
     if (fstat(file_fd, &file_stat) < 0) {
         perror("fstat");
@@ -295,18 +324,10 @@ void send_file(char * message, struct client_info* sender) {
     }
 
     off_t file_size = file_stat.st_size;
+    printf("%s\n", filename);
 
-    struct client_info *destino;
-    // Enviar el tamaño del archivo al cliente
-    for (int i = 0; i < client_count; i++)
-    {
-        if (strcmp((char *)&clients[i].username, username) == 0)
-        {
-            send(clients[i].sock, &file_size, sizeof(file_size), 0);
-            destino = &clients[i];
-        }
-    }
-
+    send(destino->sock, &file_size, sizeof(file_size), 0);
+    send(destino->sock, &filename, MAX_LINE, 0);
 
     // Enviar el archivo a todos los clientes
     send_file_to_dest(file_fd, file_size, destino);
@@ -351,13 +372,7 @@ void *handle_client(void *args)
             broadcast_opcode(1, client);
             removeDestUserFromMsg(message, newMessage);
             broadcast_message(newMessage, client);
-        }
-        else if (strcmp(dest, "listUsers") == 0)
-        {
-            printf("LIST USERS\n");
-            listConnectedUsers(client);
-        }
-        else if (strcmp(dest, "sendfile") == 0)
+        } else if (strcmp(dest, "sendfile") == 0)
         {
             send_file(message, client);
         }
