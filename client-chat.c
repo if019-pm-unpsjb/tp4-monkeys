@@ -47,6 +47,7 @@ int isDestCommand(char *dest)
 
 int is_valid_command(const char *command)
 {
+    // Verificar si el comando es uno de los comandos predefinidos
     for (int i = 0; i < COMMANDS_SIZE; i++)
     {
         if (strncmp(command, COMMANDS[i], strlen(COMMANDS[i])) == 0)
@@ -54,6 +55,21 @@ int is_valid_command(const char *command)
             return 1;
         }
     }
+
+    // Verificar si el comando es ":A <mensaje>"
+    if (strncmp(command, "A ", 2) == 0)
+    {
+        return 1;
+    }
+
+    // Verificar si el comando es ":<nombre de usuario> <mensaje>"
+    // (Debe tener al menos un carácter para el nombre del usuario y un espacio antes del mensaje)
+    char *space = strchr(command, ' ');
+    if (space != NULL && space != command)
+    {
+        return 1;
+    }
+
     return 0;
 }
 
