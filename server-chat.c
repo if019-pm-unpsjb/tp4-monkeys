@@ -11,7 +11,7 @@
 #include <sys/sendfile.h>
 #include <sys/stat.h>
 
-#define MAX_LINE 100
+#define MAX_LINE 1000
 #define MAX_CLIENTS 10
 #define MAX_USRLEN 20
 
@@ -203,6 +203,13 @@ void send_by_name(char *message, char *username)
     }
 }
 
+void wait_for_ack(struct client_info * client) {
+    while (client->ack == 0) {
+        // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
+    }
+    client->ack = 0;
+}
+
 void send_opcode_by_name(unsigned short opcode, char *username)
 {
     unsigned char str[2];
@@ -215,11 +222,7 @@ void send_opcode_by_name(unsigned short opcode, char *username)
         {
             send(clients[i].sock, str, sizeof(str), 0);
             printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
-            while (clients[i].ack == 0)
-            {
-                // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
-            }
-            clients[i].ack = 0;
+            wait_for_ack(&clients[i]);
             //acks[clients[i].ack_pos] = 0;
             // recv(clients[i].sock, ack, sizeof(ack), 0);
             printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
@@ -282,14 +285,12 @@ void send_file(char *message, struct client_info *sender) {
     j = 0;
 
     char username[MAX_USRLEN] = "";
-
+    // Sacar nombre de usuario del mensaje
     while (message[i] != ' ' && message[i] != '\0') {
         username[j] = message[i];
         i++;
         j++;
     }
-
-    printf("MANDAR ARCHIVO A %s\n", username);
 
     // Verificar si el usuario destino existe
     struct client_info *destino = NULL;
@@ -351,13 +352,9 @@ void *handle_client(void *args) {
     }
     client->username[bytes_received] = '\0';
 
-    printf("Nuevo hilo para %s %d\n", client->username, client->sock);
-
     printf("New connection from %s:%d as %s\n", inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), client->username);
 
     while ((bytes_received = recv(client->sock, buffer, MAX_LINE, 0)) > 0) {
-        printf("RECIBI %d BYTES\n", bytes_received);
-        printf("DE %s\n", client->username);
         buffer[bytes_received] = '\0';
 
         char message[MAX_LINE + 50] = "";
@@ -372,27 +369,19 @@ void *handle_client(void *args) {
             removeDestUserFromMsg(message, newMessage);
             broadcast_message(newMessage, client);
         } else if (strcmp(dest, "listUsers") == 0) {
-            printf("LIST USERS\n");
             listConnectedUsers(client);
         } else if (strcmp(dest, "sendfile") == 0) {
             send_file(message, client);
         } else if (strcmp(dest, "") != 0) {
-            printf("%s QUIERE MANDAR A %s\n", client->username, dest);
             send_opcode_by_name(1, dest);
             removeDestUserFromMsg(message, newMessage);
             send_by_name(newMessage, dest);
         } else if (buffer[1] == 3) {
             client->ack = 1;
-            //acks[client->ack_pos] = 1;
-            printf("ACK RECIBIDO\n");
-        } else {
-            printf("ERROR\n");
         }
-        printf("SALI DE ACA\n");
     }
 
     // Remove client from list
-
     logout_by_name(client->username);
 
     close(client->sock);
@@ -401,7 +390,6 @@ void *handle_client(void *args) {
 
 
 void logout_by_name(char * username) {
-    printf("%s SE QUIERE DESCONECTAR", username);
     pthread_mutex_lock(&client_mutex);
     int index = -1;
     // Buscar el usuario
@@ -418,6 +406,7 @@ void logout_by_name(char * username) {
         for (int i = index; i < client_count - 1; i++) {
             clients[i] = clients[i + 1];
         }
+        memset(&clients[client_count], 0, sizeof(struct client_info));
         client_count--;
     }
 

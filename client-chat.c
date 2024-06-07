@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#define MAX_LINE 100
+#define MAX_LINE 1000
 #define MAX_USRLEN 20
 #define DEFAULT_IP "127.0.0.1"
 #define BUFFER_SIZE 1024
@@ -199,7 +199,7 @@ int main(int argc, char *argv[])
         // Se especificó el usuario
         if (strcmp(dest, "") != 0)
         {
-            if (isDestCommand(dest) != 0)
+            if (isDestCommand(dest) == 0)
             {
                 strcpy(defDest, dest);
             }
@@ -274,7 +274,7 @@ void *receive_messages(void *args)
 
         if (buffer[1] == 2)
         {
-            printf("ARCHIVO\n");
+            printf("Recibiendo archivo...\n");
 
             unsigned char ack[2];
             ack[0] = 0;
@@ -312,7 +312,7 @@ void *receive_messages(void *args)
                 write(output_fd, buffer, bytes_received);
                 received_size += bytes_received;
             }
-            printf("Listo\n");
+            printf("Archivo recibido con éxito\n");
             close(output_fd);
         }
         else if (buffer[1] == 1)
