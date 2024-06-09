@@ -172,9 +172,11 @@ void removeDestUserFromMsg(char* str, char * newStr) {
 }
 
 void broadcast_message(char* message, struct client_info* sender) {
+    char newMsg[MAX_LINE];
+    snprintf(newMsg, sizeof(newMsg), "!%s", message);
     for (int i = 0; i < client_count; i++) {
         if (&clients[i] != sender) {
-            send(clients[i].sock, message, strlen(message), 0);
+            send(clients[i].sock, newMsg, strlen(newMsg), 0);
         }
     }
 }
@@ -381,7 +383,7 @@ void listConnectedUsers(struct client_info *client) {
 }
 
 void send_help(struct client_info * client) {
-    char * message = "Lista de comandos:\n:A <mensaje> -> Mandar un mensaje a todos los usuarios conectados.\n:<nombre_de_usuario> <mensaje> -> Mandar un mensaje a un usuario específico.\n:sendfile <nombre_archivo> <nombre_de_usuario> -> Mandar un archivo a un usuario específico.\n:listUsers -> Consultar los usuarios conectados en este momento.\n:help -> Muestra este mensaje.\nLos comandos 'A' y '<nombre_de_usuario>' quedan guardados para que no tengas que escribirlos en cada mensaje.";
+    char * message = "Lista de comandos:\n:A <mensaje> -> Mandar un mensaje a todos los usuarios conectados.\n:<nombre_de_usuario> <mensaje> -> Mandar un mensaje a un usuario específico.\n:sendfile <nombre_archivo> <nombre_de_usuario> -> Mandar un archivo a un usuario específico.\n:listUsers -> Consultar los usuarios conectados en este momento.\n:help -> Muestra este mensaje.\nLos comandos 'A' y '<nombre_de_usuario>' quedan guardados para que no tengas que escribirlos en cada mensaje.\n\nTodos los mensajes generales aparecen con '!' al principio, los que no lo tengan son mensajes privados.";
     send(client->sock, message, strlen(message), 0);
 }
 

@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
     }
 
     printf("Bienvenido al MonkeyChat!\n");
-    printf("Para empezar intentá escribir ':help' para ver la lista de comandos\n");
+    printf("Para empezar escribí ':help'.\n");
 
     memset(buffer, 0, sizeof(buffer));
     char defDest[MAX_USRLEN] = ":A ";
