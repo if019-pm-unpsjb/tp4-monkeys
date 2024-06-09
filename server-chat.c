@@ -9,10 +9,11 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/sendfile.h>
-#include <sys/stat.h> 
+#include <sys/stat.h>
 
 #define MAX_LINE 100
 #define MAX_CLIENTS 10
+#define BUFSIZE 2048
 #define MAX_USRLEN 20
 
 void* handle_client(void* args);
@@ -57,8 +58,8 @@ int main(int argc, char *argv[])
     memset(&server_addr, 0, sizeof(struct sockaddr_in));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(8080);
-    //server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    inet_aton("192.168.25.111", &(server_addr.sin_addr));
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    //inet_aton("192.168.25.111", &(server_addr.sin_addr));
 
     if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in)) == -1)
     {
@@ -120,7 +121,6 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-
 void listConnectedUsers(void* args) {
     struct client_info* client = (struct client_info*) args;
 
@@ -140,6 +140,7 @@ void listConnectedUsers(void* args) {
     send(client->sock, clientList, strlen(clientList), 0);
 
 }
+
 void getDestUser(const char* source, char* destination, size_t maxLen) {
     printf("%s\n", source);
     size_t i = 0;
@@ -204,6 +205,7 @@ void send_by_name(char * message, char * username) {
 
 void wait_for_ack(struct client_info * sender, struct client_info * client) {
     int retries = 0;
+    // Espero acknowledge con timeout manual
     while (client->ack == 0) {
         sleep(1);
         retries++;
@@ -211,7 +213,6 @@ void wait_for_ack(struct client_info * sender, struct client_info * client) {
             send_error(sender, "Error: timedout");
             break;
         }
-        // ESPERO QUE ME LLEGUE EL ACKNOWLEDGE
     }
     client->ack = 0;
 }
@@ -227,11 +228,10 @@ void send_opcode_by_name(unsigned short opcode, char *username, int wait, struct
         if (strcmp((char *)&clients[i].username, username) == 0)
         {
             send(clients[i].sock, str, sizeof(str), 0);
-            printf("MANDE OPCODE 1 A %s %d\n", username, clients[i].sock);
+            printf("MANDE OPCODE %d A %s %d\n", opcode, username, clients[i].sock);
             if (wait == 1) {
                 wait_for_ack(sender, &clients[i]);
             }
-            // recv(clients[i].sock, ack, sizeof(ack), 0);
             printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
         }
     }
@@ -263,7 +263,20 @@ void send_file_to_dest(int file_fd, off_t file_size, struct client_info* destino
     }
 }
 
+/* int receive_fd(struct client_info * client) {
+    off_t file_size;
+    
+    printf("RECIBÍ %ld\n", file_size);
+    return 1;
+} */
+
 void send_file(char * message, struct client_info* sender) {
+
+    // Espero el archivo del cliente
+    /* int client_fd = receive_fd(sender); */
+    /* printf("%d\n", client_fd); */
+
+
     char filename[20] = "";
     int i = 0;
 
@@ -297,7 +310,8 @@ void send_file(char * message, struct client_info* sender) {
     printf("MANDAR ARCHIVO A %s\n", username);
 
     struct client_info *destino;
-    // Enviar el tamaño del archivo al cliente
+
+    // Obtener cliente destino del mensaje
     for (int i = 0; i < client_count; i++)
     {
         if (strcmp((char *)&clients[i].username, username) == 0)
@@ -306,6 +320,7 @@ void send_file(char * message, struct client_info* sender) {
         }
     }
 
+    printf("Entre acá %s|%s|\n", filename, username);
     if (destino == NULL)
     {
         char error_message[MAX_LINE];
@@ -314,8 +329,13 @@ void send_file(char * message, struct client_info* sender) {
         return;
     }
 
-    int file_fd = open(filename, O_RDONLY);
-    if (file_fd == -1)
+    off_t file_size;
+
+    // Recibir tamaño del archivo
+    int bytes_received = recv(sender->sock, &file_size, sizeof(file_size), 0);
+
+    int client_fd = open("tmp", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    if (client_fd == -1)
     {
         char error_message[MAX_LINE];
         snprintf(error_message, sizeof(error_message), "Error: File %s not found.\n", filename);
@@ -324,25 +344,45 @@ void send_file(char * message, struct client_info* sender) {
         return;
     }
 
-    send_opcode_by_name(2, username, 1, sender);
-    
-    struct stat file_stat;
-    if (fstat(file_fd, &file_stat) < 0) {
-        perror("fstat");
-        close(file_fd);
+/*     file_fd = open(filename, O_RDONLY);
+    if (file_fd == -1)
+    {
+        char error_message[MAX_LINE];
+        snprintf(error_message, sizeof(error_message), "Error: File %s not found.\n", filename);
+        send_error(sender, error_message);
+        perror("open");
         return;
-    }
+    } */
 
-    off_t file_size = file_stat.st_size;
-    printf("%s\n", filename);
+    
+    // Recibir archivo del sender
+    char file_buffer[BUFSIZE];
+    off_t received_size = 0;
+    while (received_size < file_size)
+    {
+        bytes_received = recv(sender->sock, file_buffer, BUFSIZE, 0);
+        if (bytes_received <= 0)
+        {
+            // Manejar error
+            break;
+        }
+        printf("ESCRIBIENDO EN TMP\n");
+        write(client_fd, file_buffer, bytes_received);
+        received_size += bytes_received;
+    }
+    close(client_fd);
+    client_fd = open("tmp", O_RDONLY);
+
+    printf("%ld - %s\n", received_size, filename);
+
+    // Mandar archivo al destino
+    send_opcode_by_name(2, username, 1, sender);
 
     send(destino->sock, &file_size, sizeof(file_size), 0);
     send(destino->sock, &filename, MAX_LINE, 0);
 
-    // Enviar el archivo a todos los clientes
-    send_file_to_dest(file_fd, file_size, destino);
-
-    close(file_fd);
+    // Enviar el archivo a destino
+    sendfile(destino->sock, client_fd, 0, file_size);
 }
 
 struct client_info *get_destino(char *username)
@@ -422,17 +462,6 @@ void *handle_client(void *args)
 
     // Remove client from list
     logout_by_name(client->username);
-/*     pthread_mutex_lock(&client_mutex);
-    for (int i = 0; i < client_count; i++)
-    {
-        if (&clients[i] == client)
-        {
-            clients[i] = clients[--client_count];
-            break;
-        }
-    }
-    pthread_mutex_unlock(&client_mutex); */
-
     printf("%s disconnected\n", client->username);
     close(client->sock);
     return NULL;

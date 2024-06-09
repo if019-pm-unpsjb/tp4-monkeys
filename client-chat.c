@@ -9,12 +9,15 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include <sys/sendfile.h>
 
 #define MAX_LINE 100
 #define MAX_USRLEN 20
 #define DEFAULT_IP "127.0.0.1"
 #define BUFFER_SIZE 1024 
 #define COMMANDS_SIZE 1
+#define MAX_FNAME 20
 
 const char *COMMANDS[COMMANDS_SIZE] = {"sendfile"};
 
@@ -41,6 +44,22 @@ int isDestCommand(char * dest) {
         }
     }
     return 0;
+}
+
+void get_filename(const char *source, char *destination, size_t maxLen)
+{
+    int j = 0;
+
+    while (source[j] != ' ') {
+        j++;
+    }
+    j++;
+
+    while (source[j] != ' ' && source[j] != '\0') {
+        *destination++ = source[j];
+        j++;
+    }
+    *destination = '\0';
 }
 
 void getDestUser(const char *source, char *destination, size_t maxLen)
@@ -157,18 +176,50 @@ int main(int argc, char *argv[])
         memset(dest, 0, sizeof(dest));
         getDestUser(buffer, dest, MAX_USRLEN);
         // Se especificó el usuario
-        if (strcmp(dest, "") != 0) {
-            if (isDestCommand(dest) != 0) {
-                strcpy(defDest, dest);
+        if (strcmp(dest, ":sendfile ") == 0) {
+
+            send(sock, buffer, MAX_LINE, 0);
+            char fname[MAX_FNAME] = "";
+            get_filename(buffer, fname, MAX_FNAME);
+
+            int file_fd = open(fname, O_RDONLY);
+            if (file_fd == -1)
+            {                    
+                perror("open");
+                continue;
             }
-            strcpy(message, buffer);
+
+            struct stat file_stat;
+            if (fstat(file_fd, &file_stat) < 0)
+            {
+                perror("fstat");
+                close(file_fd);
+                continue;
+            }
+
+            off_t file_size = file_stat.st_size;
+
+            // Mando tamaño de archivo
+            send(sock, &file_size, sizeof(file_size), 0);
+
+            // Mando archivo
+            sendfile(sock, file_fd, 0, file_size);
         } else {
-            addDestUser(defDest, buffer, message, MAX_LINE);
+            if (strcmp(dest, "") != 0) {
+                if (isDestCommand(dest) != 0) {
+                    strcpy(defDest, dest);
+                }
+                strcpy(message, buffer);
+            } else {
+                addDestUser(defDest, buffer, message, MAX_LINE);
+            }
+            if (send(sock, message, MAX_LINE, 0) == -1)
+            {
+                break;
+            }
         }
         
-        if (send(sock, message, MAX_LINE, 0) == -1) {
-            break;
-        }
+        
         memset(message, 0, sizeof(message));
         memset(buffer, 0, sizeof(buffer));
     }
@@ -232,6 +283,7 @@ void *receive_messages(void *args) {
             }
             char recv_filename[MAX_LINE];
             char filename[MAX_LINE + strlen(username)];
+            
             // Recibir el nombre del archivo
             bytes_received = recv(socket, &recv_filename, MAX_LINE, 0);
             if (bytes_received <= 0)
@@ -240,9 +292,8 @@ void *receive_messages(void *args) {
                 break;
             }
 
-            printf("\rRecibiendo archivo %s...\n", filename);
-
             snprintf(filename, sizeof(filename), "%s%s", (char *)username, (char *)recv_filename);
+            printf("\rRecibiendo archivo %s...\n", filename);
             int output_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
             if (output_fd < 0)
             {
