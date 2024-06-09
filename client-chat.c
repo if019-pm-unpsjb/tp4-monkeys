@@ -25,9 +25,13 @@ void *receive_messages(void *args);
 
 void receive_file(int sock, const char *filename);
 
+int wait_for_ack();
+void sleep_milliseconds(long milliseconds);
+
 int sock;
 pthread_mutex_t client_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_t thread;
+int acknowledged;
 
 void handler(int signal)
 {
@@ -179,6 +183,12 @@ int main(int argc, char *argv[])
         if (strcmp(dest, ":sendfile ") == 0) {
 
             send(sock, buffer, MAX_LINE, 0);
+            int seguir = wait_for_ack();
+
+            if (seguir == 0) {
+                continue;
+            }
+
             char fname[MAX_FNAME] = "";
             get_filename(buffer, fname, MAX_FNAME);
 
@@ -226,40 +236,6 @@ int main(int argc, char *argv[])
 
     close(sock);
     return 0;
-}
-
-void write_fd_to_file(int fd, const char *filename) {
-    int output_fd;
-    ssize_t bytes_read, bytes_written;
-    char buffer[BUFFER_SIZE];
-
-    // Abrir el archivo de salida para escritura
-    output_fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    if (output_fd < 0) {
-        perror("Error abriendo el archivo de salida");
-        exit(EXIT_FAILURE);
-    }
-
-    // Leer del fd y escribir en el archivo de salida
-    while ((bytes_read = read(fd, buffer, BUFFER_SIZE)) > 0) {
-        ssize_t total_written = 0;
-        while (total_written < bytes_read) {
-            bytes_written = write(output_fd, buffer + total_written, bytes_read - total_written);
-            if (bytes_written < 0) {
-                perror("Error escribiendo en el archivo de salida");
-                close(output_fd);
-                exit(EXIT_FAILURE);
-            }
-            total_written += bytes_written;
-        }
-    }
-
-    if (bytes_read < 0) {
-        perror("Error leyendo del file descriptor");
-    }
-
-    // Cerrar el archivo de salida
-    close(output_fd);
 }
 
 void *receive_messages(void *args) {
@@ -315,6 +291,7 @@ void *receive_messages(void *args) {
                 received_size += bytes_received;
             }
             printf("Archivo escrito con éxito en %s\nYou:", filename);
+            fflush(stdout);
             close(output_fd);
         } else if (buffer[1] == 1) {
             pthread_mutex_lock(&client_mutex);
@@ -332,14 +309,39 @@ void *receive_messages(void *args) {
             pthread_mutex_unlock(&client_mutex);
         } else if (buffer[1] == 4) {
             pthread_mutex_lock(&client_mutex);
-            // RECIBIR MENSAJE
+            // RECIBIR MENSAJE DE ERROR1
             bytes_received = recv(socket, buffer, MAX_LINE, 0);
             buffer[bytes_received] = '\0';
             printf("\r%s\nYou: ", buffer);
             fflush(stdout);
             pthread_mutex_unlock(&client_mutex);
+        } else if (buffer[1] == 3) {
+            // Recibí acknowledge para sendfile
+            acknowledged = 1;
         }
     }
 
     return NULL;
+}
+
+void sleep_milliseconds(long milliseconds) {
+    struct timespec ts;
+    ts.tv_sec = milliseconds / 1000;
+    ts.tv_nsec = (milliseconds % 1000) * 1000000;
+
+    nanosleep(&ts, NULL);
+}
+
+int wait_for_ack() {
+    // Espero acknowledge con timeout manual
+    int retries = 0;
+    while (acknowledged == 0) {
+        sleep_milliseconds(100);
+        retries++;
+        if (retries == 5) {
+            return 0;
+        }
+    }
+    acknowledged = 0;
+    return 1;
 }

@@ -203,13 +203,21 @@ void send_by_name(char * message, char * username) {
     }
 }
 
+void sleep_milliseconds(long milliseconds) {
+    struct timespec ts;
+    ts.tv_sec = milliseconds / 1000;
+    ts.tv_nsec = (milliseconds % 1000) * 1000000;
+
+    nanosleep(&ts, NULL);
+}
+
 void wait_for_ack(struct client_info * sender, struct client_info * client) {
     int retries = 0;
     // Espero acknowledge con timeout manual
     while (client->ack == 0) {
-        sleep(1);
+        sleep_milliseconds(100);
         retries++;
-        if (retries == 5) {
+        if (retries == 10) {
             send_error(sender, "Error: timedout");
             break;
         }
@@ -263,20 +271,8 @@ void send_file_to_dest(int file_fd, off_t file_size, struct client_info* destino
     }
 }
 
-/* int receive_fd(struct client_info * client) {
-    off_t file_size;
-    
-    printf("RECIBÍ %ld\n", file_size);
-    return 1;
-} */
 
 void send_file(char * message, struct client_info* sender) {
-
-    // Espero el archivo del cliente
-    /* int client_fd = receive_fd(sender); */
-    /* printf("%d\n", client_fd); */
-
-
     char filename[20] = "";
     int i = 0;
 
@@ -307,8 +303,6 @@ void send_file(char * message, struct client_info* sender) {
         j++;
     }
 
-    printf("MANDAR ARCHIVO A %s\n", username);
-
     struct client_info *destino;
 
     // Obtener cliente destino del mensaje
@@ -320,7 +314,6 @@ void send_file(char * message, struct client_info* sender) {
         }
     }
 
-    printf("Entre acá %s|%s|\n", filename, username);
     if (destino == NULL)
     {
         char error_message[MAX_LINE];
@@ -328,6 +321,12 @@ void send_file(char * message, struct client_info* sender) {
         send_error(sender, error_message);
         return;
     }
+
+    // Mando acknowledge al sender para que me mande el archivo
+    unsigned char ack[2];
+    ack[0] = 0;
+    ack[1] = 3;
+    send(sender->sock, ack, sizeof(ack), 0);
 
     off_t file_size;
 
@@ -343,16 +342,6 @@ void send_file(char * message, struct client_info* sender) {
         perror("open");
         return;
     }
-
-/*     file_fd = open(filename, O_RDONLY);
-    if (file_fd == -1)
-    {
-        char error_message[MAX_LINE];
-        snprintf(error_message, sizeof(error_message), "Error: File %s not found.\n", filename);
-        send_error(sender, error_message);
-        perror("open");
-        return;
-    } */
 
     
     // Recibir archivo del sender
