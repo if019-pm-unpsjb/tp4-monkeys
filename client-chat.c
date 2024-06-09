@@ -19,7 +19,7 @@
 #define COMMANDS_SIZE 1
 #define MAX_FNAME 20
 
-const char *COMMANDS[COMMANDS_SIZE] = {"sendfile"};
+const char *COMMANDS[COMMANDS_SIZE] = {":sendfile "};
 
 void *receive_messages(void *args);
 
@@ -43,6 +43,7 @@ void handler(int signal)
 int isDestCommand(char * dest) {
     for (int i = 0; i < COMMANDS_SIZE; i++)
     {
+        printf("Comparando |%s| con |%s|\n", COMMANDS[i], dest);
         if (strcmp(COMMANDS[i], dest) == 0) {
             return 1;
         }
@@ -179,6 +180,7 @@ int main(int argc, char *argv[])
         buffer[strcspn(buffer, "\n")] = '\0';
         memset(dest, 0, sizeof(dest));
         getDestUser(buffer, dest, MAX_USRLEN);
+        printf("|%s|\n", dest);
         // Se especificó el usuario
         if (strcmp(dest, ":sendfile ") == 0) {
 
@@ -216,7 +218,8 @@ int main(int argc, char *argv[])
             sendfile(sock, file_fd, 0, file_size);
         } else {
             if (strcmp(dest, "") != 0) {
-                if (isDestCommand(dest) != 0) {
+                if (isDestCommand(dest) == 0) {
+                    printf("COPIO %s\n", defDest);
                     strcpy(defDest, dest);
                 }
                 strcpy(message, buffer);

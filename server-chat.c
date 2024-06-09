@@ -219,7 +219,7 @@ void wait_for_ack(struct client_info * sender, struct client_info * client) {
         retries++;
         if (retries == 10) {
             send_error(sender, "Error: timedout");
-            break;
+            return;
         }
     }
     client->ack = 0;
