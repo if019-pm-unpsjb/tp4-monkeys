@@ -11,10 +11,11 @@
 #include <sys/sendfile.h>
 #include <sys/stat.h>
 
-#define MAX_LINE 100
+#define MAX_LINE 1000
 #define MAX_CLIENTS 10
 #define BUFSIZE 2048
 #define MAX_USRLEN 20
+#define DEFAULT_IP "127.0.0.1"
 
 void* handle_client(void* args);
 void send_by_name(char * message, char * username);
@@ -58,8 +59,14 @@ int main(int argc, char *argv[])
     memset(&server_addr, 0, sizeof(struct sockaddr_in));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(8080);
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    //inet_aton("192.168.25.111", &(server_addr.sin_addr));
+
+    if (argc == 2) {
+        inet_aton(argv[1], &(server_addr.sin_addr));
+    } else {
+        inet_aton(DEFAULT_IP, &(server_addr.sin_addr));
+    }
+
+    //server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_in)) == -1)
     {
@@ -85,7 +92,6 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        printf("Me llegó una conexión\n");
 
         pthread_mutex_lock(&client_mutex);
 
@@ -120,29 +126,7 @@ int main(int argc, char *argv[])
     close(server_sock);
     return 0;
 }
-
-void listConnectedUsers(void* args) {
-    struct client_info* client = (struct client_info*) args;
-
-    // Buffer para almacenar la lista de usuarios
-    char clientList[2048];
-    int offset = 0;
-
-    for (int i = 0; i < client_count; i++) {
-        if (strcmp(clients[i].username, client->username) != 0) {
-            // Añadir el nombre de usuario al buffer
-            int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
-            offset += len;
-        }
-    }
-    printf("CLIENTS %s\n", clientList);
-
-    send(client->sock, clientList, strlen(clientList), 0);
-
-}
-
 void getDestUser(const char* source, char* destination, size_t maxLen) {
-    printf("%s\n", source);
     size_t i = 0;
     int j = 0;
     while (source[j] != ' ') {
@@ -230,17 +214,14 @@ void send_opcode_by_name(unsigned short opcode, char *username, int wait, struct
     unsigned char str[2];
     str[0] = 0;
     str[1] = opcode;
-    printf("%d count\n", client_count);
     for (int i = 0; i < client_count; i++)
     {
         if (strcmp((char *)&clients[i].username, username) == 0)
         {
             send(clients[i].sock, str, sizeof(str), 0);
-            printf("MANDE OPCODE %d A %s %d\n", opcode, username, clients[i].sock);
             if (wait == 1) {
                 wait_for_ack(sender, &clients[i]);
             }
-            printf("ME LLEGO ACK DE %s %d\n", username, clients[i].sock);
         }
     }
 }
@@ -355,14 +336,11 @@ void send_file(char * message, struct client_info* sender) {
             // Manejar error
             break;
         }
-        printf("ESCRIBIENDO EN TMP\n");
         write(client_fd, file_buffer, bytes_received);
         received_size += bytes_received;
     }
     close(client_fd);
     client_fd = open("tmp", O_RDONLY);
-
-    printf("%ld - %s\n", received_size, filename);
 
     // Mandar archivo al destino
     send_opcode_by_name(2, username, 1, sender);
@@ -386,6 +364,27 @@ struct client_info *get_destino(char *username)
     return NULL;
 }
 
+void listConnectedUsers(struct client_info *client) {
+    char clientList[MAX_LINE] = "Connected users:\n";
+    int offset = strlen(clientList);
+
+    pthread_mutex_lock(&client_mutex);
+
+    for (int i = 0; i < client_count; i++) {
+        int len = snprintf(clientList + offset, sizeof(clientList) - offset, "%s\n", clients[i].username);
+        offset += len;
+    }
+
+    pthread_mutex_unlock(&client_mutex);
+
+    send(client->sock, clientList, strlen(clientList), 0);
+}
+
+void send_help(struct client_info * client) {
+    char * message = "Lista de comandos:\n:A <mensaje> -> Mandar un mensaje a todos los usuarios conectados.\n:<nombre_de_usuario> <mensaje> -> Mandar un mensaje a un usuario específico.\n:sendfile <nombre_archivo> <nombre_de_usuario> -> Mandar un archivo a un usuario específico.\n:listUsers -> Consultar los usuarios conectados en este momento.\n:help -> Muestra este mensaje.\nLos comandos 'A' y '<nombre_de_usuario>' quedan guardados para que no tengas que escribirlos en cada mensaje.";
+    send(client->sock, message, strlen(message), 0);
+}
+
 void *handle_client(void *args)
 {
     struct client_info *client = (struct client_info *)args;
@@ -401,14 +400,15 @@ void *handle_client(void *args)
     }
     client->username[bytes_received] = '\0';
 
-    printf("Nuevo hilo para %s %d\n", client->username, client->sock);
-
+    char newUserMsg[MAX_LINE];
+    snprintf(newUserMsg, sizeof(newUserMsg), "%s connected.\n", client->username);
     printf("New connection from %s:%d as %s\n", inet_ntoa(client->addr.sin_addr), ntohs(client->addr.sin_port), client->username);
+    broadcast_opcode(1, client);
+    broadcast_message(newUserMsg, client);
+
 
     while ((bytes_received = recv(client->sock, buffer, MAX_LINE, 0)) > 0)
     {
-        printf("RECIBI %d BYTES\n", bytes_received);
-        printf("DE %s\n", client->username);
         buffer[bytes_received] = '\0';
 
         char message[MAX_LINE + 50] = "";
@@ -423,6 +423,12 @@ void *handle_client(void *args)
             broadcast_opcode(1, client);
             removeDestUserFromMsg(message, newMessage);
             broadcast_message(newMessage, client);
+        } else if (strcmp(dest, "listUsers") == 0) {
+            send_opcode_by_name(4, client->username, 0, client);
+            listConnectedUsers(client);
+        } else if (strcmp(dest, "help") == 0) {
+            send_opcode_by_name(4, client->username, 0, client);
+            send_help(client);
         } else if (strcmp(dest, "sendfile") == 0)
         {
             send_file(message, client);

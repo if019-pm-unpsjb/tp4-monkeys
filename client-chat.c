@@ -12,14 +12,14 @@
 #include <sys/stat.h>
 #include <sys/sendfile.h>
 
-#define MAX_LINE 100
+#define MAX_LINE 1000
 #define MAX_USRLEN 20
 #define DEFAULT_IP "127.0.0.1"
 #define BUFFER_SIZE 1024 
-#define COMMANDS_SIZE 1
+#define COMMANDS_SIZE 3
 #define MAX_FNAME 20
 
-const char *COMMANDS[COMMANDS_SIZE] = {":sendfile "};
+const char *COMMANDS[COMMANDS_SIZE] = {":sendfile ", ":listUsers ", ":help "};
 
 void *receive_messages(void *args);
 
@@ -36,7 +36,6 @@ int acknowledged;
 void handler(int signal)
 {
     close(sock);
-    // pthread_exit(&thread);
     exit(EXIT_SUCCESS);
 }
 
@@ -167,6 +166,9 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    printf("Bienvenido al MonkeyChat!\n");
+    printf("Para empezar intentá escribir ':help' para ver la lista de comandos\n");
+
     memset(buffer, 0, sizeof(buffer));
     char defDest[MAX_USRLEN] = ":A ";
     char dest[MAX_USRLEN] = "";
@@ -217,7 +219,6 @@ int main(int argc, char *argv[])
         } else {
             if (strcmp(dest, "") != 0) {
                 if (isDestCommand(dest) == 0) {
-                    printf("COPIO %s\n", defDest);
                     strcpy(defDest, dest);
                 }
                 strcpy(message, buffer);
