@@ -43,7 +43,6 @@ void handler(int signal)
 int isDestCommand(char * dest) {
     for (int i = 0; i < COMMANDS_SIZE; i++)
     {
-        printf("Comparando |%s| con |%s|\n", COMMANDS[i], dest);
         if (strcmp(COMMANDS[i], dest) == 0) {
             return 1;
         }
@@ -180,7 +179,6 @@ int main(int argc, char *argv[])
         buffer[strcspn(buffer, "\n")] = '\0';
         memset(dest, 0, sizeof(dest));
         getDestUser(buffer, dest, MAX_USRLEN);
-        printf("|%s|\n", dest);
         // Se especificó el usuario
         if (strcmp(dest, ":sendfile ") == 0) {
 
